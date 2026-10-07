@@ -4,7 +4,7 @@
 
 | Path | Content |
 |---|---|
-| `modules/api-hostname/` | `main.tf` (certificate, validation, SSM), `records.tf` (backend registry, weights guard, records), `monitoring.tf` (topic, policy, subscription, alarms), `variables.tf`, `outputs.tf`, `versions.tf`, `imports.tf` (temporary, see migrations) |
+| `modules/api-hostname/` | `main.tf` (certificate, validation, SSM), `records.tf` (backend registry, weights guard, records), `monitoring.tf` (topic, policy, subscription, alarms), `variables.tf`, `outputs.tf`, `versions.tf` (the adoption file is kept only as a reference in `docs/migrations/001-move-api-edge/imports.tf.example`) |
 | `environments/root.hcl` | Provider with default tags, S3 remote state, `context = oecalc` |
 | `environments/common/api-hostname.hcl` | Unit shared by both environments |
 | `environments/{dev,prod}/env.hcl` | Region, web domain, hosted zone, alert email, weights |
