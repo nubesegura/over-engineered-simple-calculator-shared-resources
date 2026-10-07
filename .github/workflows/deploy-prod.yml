@@ -1,0 +1,30 @@
+name: Deploy PROD
+
+# Gitflow: a push to main that changes the infrastructure deploys prod. The "prod" GitHub environment
+# should have required reviewers, so the apply waits for a manual approval. A weight is a GitHub
+# environment variable: after changing API_WEIGHT_<NAME> run this workflow by hand.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - environments/**
+      - modules/**
+      - .github/workflows/**
+      - .github/actions/**
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: prod
+    secrets: inherit

@@ -1,0 +1,29 @@
+name: Deploy DEV
+
+# Gitflow: a push to develop that changes the infrastructure deploys dev. A weight is a GitHub
+# environment variable, not a file: after changing API_WEIGHT_<NAME> run this workflow by hand.
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - environments/**
+      - modules/**
+      - .github/workflows/**
+      - .github/actions/**
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: ci
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: dev
+    secrets: inherit
