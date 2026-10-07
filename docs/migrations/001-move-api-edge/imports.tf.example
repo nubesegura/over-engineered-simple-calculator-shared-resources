@@ -1,8 +1,10 @@
 # ---------------------------------------------------------
-# TEMPORARY. Adoption of the resources that the webpage repository created (spec 001-move-api-edge).
-# Import blocks are idempotent: once a resource is in this state they do nothing. Remove this file
-# after the migration of every environment (it reads the existing certificate parameter, so it does
-# not work in an account where nothing was created before).
+# REFERENCE, NOT LOADED BY TERRAFORM (file extension .example, outside modules/).
+# This is the adoption used on 2026-10-07 to move the API edge from the webpage repository to this one
+# (spec 001-move-api-edge). To reuse it: copy it into the module as imports.tf, adapt the ids, run a plan,
+# check there is no delete or replace, deploy, then retire it again. Import blocks are idempotent: once a
+# resource is in the state they do nothing. It reads the existing certificate parameter, so it does not
+# work in an account where nothing was created before (that is the case of prod: a first deployment).
 #
 # Not imported on purpose:
 #   - the DNS validation record: created by overwrite (allow_overwrite, same name, type and value);

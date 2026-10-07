@@ -34,4 +34,4 @@ flip back).
 
 - Do not run `apply`, `import` or `state` commands by hand without authorization; the CI applies.
 - An email subscription can be imported only when confirmed and its ARN is not predictable: create it again instead.
-- The reference files (`imports.tf.example`, and `removed.tf.example` for the old owner) are added here once `prod` is migrated.
+- The reference files are `001-move-api-edge/imports.tf.example` (adoption in the new owner, here) and `removed.tf.example` (release in the old owner, in the webpage repository under `docs/migrations/003-move-api-edge-out/`). They are not loaded by Terraform.
