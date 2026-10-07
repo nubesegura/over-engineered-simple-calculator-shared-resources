@@ -43,3 +43,10 @@ refuses a plan where every published backend has weight 0. The deploy summary li
 GitHub environment `dev` or `prod` needs the secrets `ROLE_ARN`, `AWS_ACCOUNT_ID` and `SUPPORT_EMAIL`, and the
 variables `AWS_REGION`, `ROUTE53_ZONE_ID` and the `API_WEIGHT_*` above. The deployment refuses any plan that
 destroys or replaces a resource: those need a reviewed manual run.
+
+## Documentation
+
+- [Architecture](docs/architecture.md): components, resource inventory, flows, deployment order, trust boundaries.
+- [Technical guide](docs/technical.md): state keys, variables, workflows, adding a backend, switching weights.
+- [ADR 0001](docs/adr/0001-api-edge-in-a-shared-repository.md): why the API edge lives here.
+- [Migrations](docs/migrations/README.md): how resources are moved between Terraform states.
