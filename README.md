@@ -50,3 +50,15 @@ destroys or replaces a resource: those need a reviewed manual run.
 - [Technical guide](docs/technical.md): state keys, variables, workflows, adding a backend, switching weights.
 - [ADR 0001](docs/adr/0001-api-edge-in-a-shared-repository.md): why the API edge lives here.
 - [Migrations](docs/migrations/README.md): how resources are moved between Terraform states.
+
+## Destroying the dev environment
+
+The manual workflow **Destroy DEV** (`.github/workflows/destroy-dev.yml`) tears down this repository's `dev` environment. There are no approvers (single-user organization), so the safety is inside the workflow:
+
+1. Run it from the `develop` branch (Actions, Destroy DEV, Run workflow). The default mode is **plan**: it lists what would be destroyed and touches nothing.
+2. Read the summary of the run. To destroy, run it again with mode **destroy** and type the name of this repository in `confirm`.
+3. It uses the `dev` GitHub environment and the dev AWS account only; the account is verified before anything runs. There is no destroy workflow for `prod`.
+
+Teardown order across the repositories: the backends (`ecs`, `sls`) first, then the web page (`webpage`), then `shared-resources` (certificate and DNS of the API). The Terraform state bucket and the GitHub variables and secrets are not removed.
+
+Notes: the workflow refuses mode destroy while any backend still publishes its target under `/oecalc/dev/api-backends`, because the backends depend on the certificate and on the records of this repository.
