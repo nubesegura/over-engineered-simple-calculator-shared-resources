@@ -4,8 +4,12 @@
 #   /<context>/<env>/api-backends/<backend>/dns-name
 #   /<context>/<env>/api-backends/<backend>/hosted-zone-id
 # A backend whose two parameters do not exist yet is skipped, without failing.
-# Alias records inherit the TTL of their target; the weights decide the traffic split
-# (changing a weight is a Route 53 change, DNS caches converge within the target TTL).
+# Alias records have no TTL of their own: they inherit the target's (60 seconds for an ALB), so there is no ttl
+# argument. Weights decide the traffic split.
+# evaluate_target_health is false on purpose: it hides a failing backend silently (no metric, no console status) and
+# the owner wants the state visible in Route 53. Availability is watched with alarms on the backends instead.
+#
+# Changing a weight is a Route 53 change; DNS caches converge within the target TTL.
 # ---------------------------------------------------------
 data "aws_ssm_parameters_by_path" "backends" {
   path            = "/${var.context}/${var.env_type}/api-backends"
