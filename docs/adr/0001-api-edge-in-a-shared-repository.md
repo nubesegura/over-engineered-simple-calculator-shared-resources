@@ -27,4 +27,9 @@ the host name do not change, so the backends are not touched. The deployment ref
 - Tags `app-name` and `repo-name` of the moved resources change in place to this repository.
 - The migration pattern is documented in `docs/migrations/` and can be reused for later moves (Cognito is a candidate).
 - A guard failure blocks the pipeline: replacing the certificate or a record needs a reviewed manual run.
+- Amendment 2026-10-13: destroying a backend removes its SSM parameters, so the module drops its weighted record and the
+  plan contains a delete. The guard now allows a pure delete of a record `aws_route53_record.api[...]` whose backend is
+  no longer in the plan (retiring a backend), keeps refusing everything else, and a daily drift check (plan only) in dev
+  warns when the records no longer match the published backends. Repositories stay independent: no cross-repository
+  credentials.
 - `dev` was migrated on 2026-10-07. `prod` had none of these resources (checked read-only), so it is a first deployment of this repository by the owner, not a migration; the adoption file is kept only as a reference.

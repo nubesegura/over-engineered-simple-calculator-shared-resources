@@ -77,6 +77,8 @@ Outputs: `certificate_arn`, `api_domain_name`, `active_backends` (name to weight
   (`develop` to `dev`, `main` to `prod`).
 - Between repositories: only SSM parameters (certificate ARN written here, backend targets written by the backends);
   no shared state, no cross-account access.
-- The plan guard refuses deletes and replacements: the certificate, the records and the alarms cannot disappear by a
-  routine deployment.
+- The plan guard refuses deletes and replacements: the certificate, the validation records and the alarms cannot
+  disappear by a routine deployment. The only delete it allows is a weighted record of a backend that is no longer
+  published (the backend was destroyed); see `scripts/plan_guard.py`. A daily drift check (dev) runs a plan without
+  applying and alerts by a failed job.
 - The SNS topic accepts publishes only from CloudWatch of the same account and only over TLS.

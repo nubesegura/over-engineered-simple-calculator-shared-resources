@@ -32,3 +32,7 @@ ai-related-docs/
 .DS_Store
 Thumbs.db
 .claude/
+
+# Python caches
+__pycache__/
+*.pyc

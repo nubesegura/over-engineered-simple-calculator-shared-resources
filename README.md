@@ -42,7 +42,8 @@ refuses a plan where every published backend has weight 0. The deploy summary li
 
 GitHub environment `dev` or `prod` needs the secrets `ROLE_ARN`, `AWS_ACCOUNT_ID` and `SUPPORT_EMAIL`, and the
 variables `AWS_REGION`, `ROUTE53_ZONE_ID` and the `API_WEIGHT_*` above. The deployment refuses any plan that
-destroys or replaces a resource: those need a reviewed manual run.
+destroys or replaces a resource, except retiring the weighted record of a backend that was destroyed: those need a
+reviewed manual run. A daily drift check (dev) reports differences without applying.
 
 ## Documentation
 

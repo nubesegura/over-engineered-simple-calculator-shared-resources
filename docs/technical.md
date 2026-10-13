@@ -42,9 +42,20 @@ For local runs, an untracked `secrets.yml` next to `env.hcl` can provide the sam
 - **Deploy DEV / Deploy PROD:** run CI, then the reusable `deploy.yml`. Triggered by a push to `develop` / `main` that
   changes `environments/**`, `modules/**` or the workflows, or by hand. `deploy.yml` validates the branch and the
   configuration, assumes the role, checks the account, runs `terragrunt plan -out=tfplan`, **refuses any delete or
-  replacement** by reading the plan JSON (`resource_changes` with action `delete`), applies the same saved plan and
-  writes the active weights in the job summary. One apply at a time per environment (concurrency group).
+  replacement** by reading the plan JSON with `scripts/plan_guard.py check` (one exception, below), applies the same
+  saved plan and writes the active weights in the job summary. One apply at a time per environment (concurrency group).
+- **Guard rule (changed 2026-10-13):** a plan is refused if it deletes or replaces anything, except a pure delete
+  (actions exactly `["delete"]`) of an `aws_route53_record.api[...]` whose `set_identifier` is not kept by any other
+  record of the plan: a backend that was destroyed and no longer publishes its SSM parameters. The certificate, the
+  validation records, the alarms, the zone and any replacement stay protected. The retired backends are listed in the
+  job summary. The `weights_guard` precondition is unchanged. Tests: `python -m unittest discover -s scripts/tests`
+  (also a CI job).
 - A guard failure means the change needs a reviewed manual run outside the CI.
+- **Drift check DEV** (`drift-check.yml`; daily 06:17 UTC and by hand, dev only): same role, account check and
+  variables as the deploy; runs `terragrunt plan -detailed-exitcode` and never applies. It fails the job (GitHub
+  emails the owner) when the plan is not empty or errors, and the summary classifies the plan: backend retired,
+  backend new, weights changed, other drift. A failed weights guard shows as a plan error. It plans the `develop`
+  branch.
 - GitHub Actions must be enabled on the repository for a push to trigger anything.
 
 ## Switch weights
@@ -64,6 +75,13 @@ DNS caches converge within the target TTL. The module fails the plan if all publ
 3. Add `API_WEIGHT_<NAME>: ${{ vars.API_WEIGHT_<NAME> }}` to the `env` block of `.github/workflows/deploy.yml` and to the
    "at least one weight" check.
 4. Create the GitHub variable in each environment and deploy. Names use lowercase letters, digits and hyphens.
+
+## Retire a backend
+
+1. Destroy the backend (its SSM parameters under `/oecalc/<env>/api-backends/<name>/` disappear).
+2. Run **Deploy DEV** (or **Deploy PROD**) of this repository, or wait for the daily drift check to flag it and then run
+   the deploy. The module drops the weighted record of that backend and the guard allows exactly that delete.
+3. If the remaining backends all have weight 0, the weights guard fails: set `API_WEIGHT_<NAME>` of a remaining one first.
 
 ## Move resources between states
 

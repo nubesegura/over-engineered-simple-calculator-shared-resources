@@ -123,19 +123,18 @@ jobs:
         run: terragrunt plan -out=tfplan
 
       # Owner rule (2026-10-06): this repository owns the certificate and the DNS of the API. A plan
-      # that deletes or replaces anything (a replacement is delete + create) is refused; run it by hand
-      # and review it if it is intended.
+      # that deletes or replaces anything (a replacement is delete + create) is refused, with one
+      # exception: a pure delete of a weighted record (aws_route53_record.api) of a backend that is no
+      # longer in the plan, i.e. a backend that was destroyed and no longer publishes its SSM registry
+      # parameters. Anything else needs a reviewed manual run. Logic and tests: scripts/plan_guard.py.
       - name: Refuse destroys and replacements
         working-directory: environments/${{ inputs.environment }}/api-hostname
         run: |
+          set -o pipefail
           terragrunt show -json tfplan > "$RUNNER_TEMP/plan.json"
-          jq -e . "$RUNNER_TEMP/plan.json" > /dev/null || { echo "::error::Could not read the saved plan as JSON"; exit 1; }
-          DELETES=$(jq -r '[.resource_changes[]? | select(.change.actions | index("delete")) | .address] | join(", ")' "$RUNNER_TEMP/plan.json")
-          if [ -n "$DELETES" ]; then
-            echo "::error::The plan deletes or replaces: $DELETES"
-            exit 1
-          fi
-          echo "No delete and no replacement in the saved plan"
+          python3 "$GITHUB_WORKSPACE/scripts/plan_guard.py" check "$RUNNER_TEMP/plan.json" | tee "$RUNNER_TEMP/guard.md"
+          # Retired backends (if any) are shown in the job summary.
+          grep -q '^### Retired backends' "$RUNNER_TEMP/guard.md" && cat "$RUNNER_TEMP/guard.md" >> "$GITHUB_STEP_SUMMARY" || true
 
       - name: Terragrunt Apply
         working-directory: environments/${{ inputs.environment }}/api-hostname

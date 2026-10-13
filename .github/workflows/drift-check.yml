@@ -1,0 +1,150 @@
+name: Drift check DEV
+
+# Daily read-only check: runs `terragrunt plan -detailed-exitcode` and NEVER applies. The job fails
+# (GitHub emails the owner) when the plan is not empty or cannot be computed, for example:
+#   - a backend was destroyed and its weighted record must be removed (run Deploy DEV);
+#   - a backend published its SSM parameters and its record must be added;
+#   - a weight variable changed, or something drifted outside Terraform;
+#   - the weights guard failed (every published backend has weight 0): the plan error is shown as is.
+# Dev only: prod is not deployed from this repository yet. Scheduled runs use the default branch's copy
+# of this file, but the code that is planned is always `develop`, like Deploy DEV.
+on:
+  schedule:
+    - cron: "17 6 * * *" # daily, UTC
+  workflow_dispatch:
+
+permissions:
+  id-token: write # Required for requesting the JWT for AWS OIDC
+  contents: read # Required for actions/checkout
+
+env:
+  TERRAFORM_VERSION: "1.16.2"
+  TERRAGRUNT_VERSION: "1.1.5"
+
+jobs:
+  drift:
+    name: Drift check dev
+    runs-on: ubuntu-latest
+    environment: dev
+    # Same group as Deploy DEV: never plan while an apply holds the state lock.
+    concurrency:
+      group: deploy-dev
+      cancel-in-progress: false
+    env:
+      ROUTE53_ZONE_ID: ${{ vars.ROUTE53_ZONE_ID }}
+      SUPPORT_EMAIL: ${{ secrets.SUPPORT_EMAIL }}
+      API_WEIGHT_SLS: ${{ vars.API_WEIGHT_SLS }}
+      API_WEIGHT_ECS: ${{ vars.API_WEIGHT_ECS }}
+      API_WEIGHT_EKS: ${{ vars.API_WEIGHT_EKS }}
+      API_WEIGHT_EC2: ${{ vars.API_WEIGHT_EC2 }}
+      TG_NON_INTERACTIVE: "true"
+      TF_CLI_ARGS_plan: "-no-color"
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: develop
+
+      - name: Validate environment configuration
+        working-directory: environments/dev
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ROLE_ARN_SET: ${{ secrets.ROLE_ARN != '' }}
+          AWS_ACCOUNT_ID_SET: ${{ secrets.AWS_ACCOUNT_ID != '' }}
+          SUPPORT_EMAIL_SET: ${{ secrets.SUPPORT_EMAIL != '' }}
+        run: |
+          missing=0
+          for name in AWS_REGION ROUTE53_ZONE_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Variable '$name' is not set in the 'dev' GitHub environment"
+              missing=1
+            fi
+          done
+          for secret in ROLE_ARN AWS_ACCOUNT_ID SUPPORT_EMAIL; do
+            flag="${secret}_SET"
+            if [ "${!flag}" != "true" ]; then
+              echo "::error::Secret '$secret' is not set in the 'dev' GitHub environment"
+              missing=1
+            fi
+          done
+          if [ -z "$API_WEIGHT_SLS$API_WEIGHT_ECS$API_WEIGHT_EKS$API_WEIGHT_EC2" ]; then
+            echo "::error::Set at least one of the variables API_WEIGHT_SLS, API_WEIGHT_ECS, API_WEIGHT_EKS or API_WEIGHT_EC2 in the 'dev' GitHub environment"
+            missing=1
+          fi
+          [ "$missing" -eq 0 ] || exit 1
+          if ! grep -qE "^\s*aws_region\s*=\s*\"$AWS_REGION\"" env.hcl; then
+            echo "::error file=environments/dev/env.hcl::AWS_REGION ($AWS_REGION) does not match aws_region in env.hcl"
+            exit 1
+          fi
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ secrets.ROLE_ARN }}
+          role-session-name: gha-shared-drift-dev-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Verify target AWS account
+        env:
+          EXPECTED_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+        run: |
+          ACTUAL_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          if [ "$ACTUAL_ACCOUNT" != "$EXPECTED_ACCOUNT" ]; then
+            echo "::error::Credentials point to account $ACTUAL_ACCOUNT, expected $EXPECTED_ACCOUNT"
+            exit 1
+          fi
+
+      - name: Setup IaC Tooling
+        uses: ./.github/actions/setup-iac
+        with:
+          terraform-version: ${{ env.TERRAFORM_VERSION }}
+          terragrunt-version: ${{ env.TERRAGRUNT_VERSION }}
+
+      # Plan only. Exit code 0 = no changes, 2 = changes, anything else = error (including a failed
+      # weights guard precondition, whose message stays in the log and in the summary).
+      - name: Terragrunt Plan (detailed exit code)
+        id: plan
+        working-directory: environments/dev/api-hostname
+        run: |
+          set +e
+          terragrunt plan -detailed-exitcode -lock=false -out=tfplan 2>&1 | tee "$RUNNER_TEMP/plan.txt"
+          code=${PIPESTATUS[0]}
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Summary of the drift
+        working-directory: environments/dev/api-hostname
+        env:
+          PLAN_EXIT: ${{ steps.plan.outputs.exitcode }}
+        run: |
+          {
+            echo "### Drift check (dev)"
+            case "$PLAN_EXIT" in
+              0) echo "No drift: the plan is empty." ;;
+              2)
+                echo "The plan is not empty. Run **Deploy DEV** after reviewing it (a destroyed backend is retired by the deploy guard)."
+                echo ""
+                if terragrunt show -json tfplan > "$RUNNER_TEMP/plan.json" && python3 "$GITHUB_WORKSPACE/scripts/plan_guard.py" summary "$RUNNER_TEMP/plan.json"; then
+                  :
+                else
+                  echo "The plan could not be classified; read the job log."
+                fi
+                ;;
+              *)
+                echo "The plan failed (exit code $PLAN_EXIT). Last lines of the error:"
+                echo '```'
+                grep -iE "error|precondition|weight" "$RUNNER_TEMP/plan.txt" | head -20
+                echo '```'
+                ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail when there is drift or an error
+        env:
+          PLAN_EXIT: ${{ steps.plan.outputs.exitcode }}
+        run: |
+          case "$PLAN_EXIT" in
+            0) echo "No drift" ;;
+            2) echo "::error::Drift detected in dev: see the job summary"; exit 1 ;;
+            *) echo "::error::The plan failed (exit code $PLAN_EXIT): see the job log"; exit 1 ;;
+          esac
