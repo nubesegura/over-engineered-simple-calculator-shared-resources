@@ -1,0 +1,26 @@
+[
+  {
+    "ParameterKey": "EnvironmentType",
+    "ParameterValue": "dev"
+  },
+  {
+    "ParameterKey": "Context",
+    "ParameterValue": "oecalc"
+  },
+  {
+    "ParameterKey": "StrippedRegion",
+    "ParameterValue": "useast2"
+  },
+  {
+    "ParameterKey": "WebDomainName",
+    "ParameterValue": "over-engineered-simple-calculator.dev.nube-segura.com"
+  },
+  {
+    "ParameterKey": "WsHostEnabled",
+    "ParameterValue": "true"
+  },
+  {
+    "ParameterKey": "CertificateExpiryAlertDays",
+    "ParameterValue": "30,7"
+  }
+]

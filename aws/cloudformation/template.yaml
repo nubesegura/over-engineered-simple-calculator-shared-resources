@@ -1,0 +1,443 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::LanguageExtensions
+Description: >
+  Shared API edge of Over-Engineered Simple Calculator (api.<web domain> and ws.<web domain>).
+  Pure CloudFormation alternative to the Terraform / Terragrunt unit environments/<env>/api-hostname
+  (module modules/api-hostname): same resource names, same SSM contracts, same alarms.
+  Only ONE tool may own an environment at a time (see PARITY-REPORT.md).
+
+# ---------------------------------------------------------------------------------------------------
+# Inputs
+#   Versioned (parameters/<env>-<region>.json): EnvironmentType, Context, StrippedRegion, WebDomainName,
+#     WsHostEnabled, CertificateExpiryAlertDays.
+#   Deploy time only (never in versioned files): ZoneId (ROUTE53_ZONE_ID), AlertEmail (SUPPORT_EMAIL),
+#     backend weights (API_WEIGHT_<NAME>) and the backend targets resolved from the SSM registry
+#     /<context>/<env>/api-backends/<name>/{dns-name,hosted-zone-id}. CloudFormation cannot list SSM
+#     parameters by path nor skip a missing one, so the deploy script resolves them and passes them
+#     here; an empty value means "not published" and the record is not created.
+# ---------------------------------------------------------------------------------------------------
+Parameters:
+  EnvironmentType:
+    Type: String
+    Description: Environment tier; always the last segment of every resource name
+    AllowedValues: [dev, qa, prod]
+
+  Context:
+    Type: String
+    Description: Functional context shared by every resource of the project (naming convention segment)
+    Default: oecalc
+    AllowedPattern: '^[a-z0-9]+$'
+    ConstraintDescription: must contain only lowercase letters and digits.
+
+  StrippedRegion:
+    Type: String
+    Description: Deployment region without hyphens, used in resource names (us-east-2 -> useast2)
+    AllowedPattern: '^[a-z]+[0-9]+$'
+    ConstraintDescription: must be the region name without hyphens, for example useast2.
+
+  WebDomainName:
+    Type: String
+    Description: Public domain name of the web page; the API hostname is api.<WebDomainName>
+    AllowedPattern: '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'
+    ConstraintDescription: must be a lowercase domain name.
+
+  ZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: >
+      Route 53 hosted zone that contains the API hostname; it must live in the same account as the
+      environment (GitHub environment variable ROUTE53_ZONE_ID). Passed at deploy time.
+
+  AlertEmail:
+    Type: String
+    NoEcho: true
+    Description: Email that receives the certificate expiry alerts (GitHub environment secret SUPPORT_EMAIL). Passed at deploy time.
+    AllowedPattern: '^[^@ ]+@[^@ ]+$'
+    ConstraintDescription: must be an email address.
+
+  CertificateExpiryAlertDays:
+    Type: CommaDelimitedList
+    Description: Days before expiry at which an alarm fires (ACM-03, exactly 30 and 7)
+    Default: '30,7'
+
+  WsHostEnabled:
+    Type: String
+    Description: Create the ws.<web domain> certificate, its SSM pointer, expiry alarms and record (true in dev, false in prod)
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  # --- Weighted backends of api.<web domain> (registered names: sls, ecs, eks, ec2) ---
+  # Weight: integer 0-255 (API_WEIGHT_<NAME>; unset or non-numeric counts as 0, like env.hcl).
+  # DnsName / HostedZoneId: values of the backend SSM registry; empty when not published.
+  SlsWeight:
+    Type: String
+    Description: Routing weight of the sls backend (0-255)
+    Default: '0'
+    AllowedPattern: '^(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])$'
+    ConstraintDescription: must be an integer from 0 to 255.
+  SlsDnsName:
+    Type: String
+    Description: Value of /<context>/<env>/api-backends/sls/dns-name (empty when not published)
+    Default: ''
+  SlsHostedZoneId:
+    Type: String
+    Description: Value of /<context>/<env>/api-backends/sls/hosted-zone-id (empty when not published)
+    Default: ''
+
+  EcsWeight:
+    Type: String
+    Description: Routing weight of the ecs backend (0-255)
+    Default: '0'
+    AllowedPattern: '^(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])$'
+    ConstraintDescription: must be an integer from 0 to 255.
+  EcsDnsName:
+    Type: String
+    Description: Value of /<context>/<env>/api-backends/ecs/dns-name (empty when not published)
+    Default: ''
+  EcsHostedZoneId:
+    Type: String
+    Description: Value of /<context>/<env>/api-backends/ecs/hosted-zone-id (empty when not published)
+    Default: ''
+
+  EksWeight:
+    Type: String
+    Description: Routing weight of the eks backend (0-255)
+    Default: '0'
+    AllowedPattern: '^(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])$'
+    ConstraintDescription: must be an integer from 0 to 255.
+  EksDnsName:
+    Type: String
+    Description: Value of /<context>/<env>/api-backends/eks/dns-name (empty when not published)
+    Default: ''
+  EksHostedZoneId:
+    Type: String
+    Description: Value of /<context>/<env>/api-backends/eks/hosted-zone-id (empty when not published)
+    Default: ''
+
+  Ec2Weight:
+    Type: String
+    Description: Routing weight of the ec2 backend (0-255)
+    Default: '0'
+    AllowedPattern: '^(0|[1-9][0-9]?|1[0-9]{2}|2[0-4][0-9]|25[0-5])$'
+    ConstraintDescription: must be an integer from 0 to 255.
+  Ec2DnsName:
+    Type: String
+    Description: Value of /<context>/<env>/api-backends/ec2/dns-name (empty when not published)
+    Default: ''
+  Ec2HostedZoneId:
+    Type: String
+    Description: Value of /<context>/<env>/api-backends/ec2/hosted-zone-id (empty when not published)
+    Default: ''
+
+  # --- WebSocket backend of ws.<web domain> (simple record, never weighted) ---
+  WsDnsName:
+    Type: String
+    Description: Value of /<context>/<env>/api-backends/ws/dns-name (empty when not published)
+    Default: ''
+  WsHostedZoneId:
+    Type: String
+    Description: Value of /<context>/<env>/api-backends/ws/hosted-zone-id (empty when not published)
+    Default: ''
+
+# ---------------------------------------------------------------------------------------------------
+# Guards evaluated before any resource changes (Terraform: variable validations and preconditions).
+# The check "the API hostname is a subdomain of the hosted zone" needs the zone name, which Rules
+# cannot read: the deploy script performs it (.github/workflows-local/deploy-dev.sh).
+# ---------------------------------------------------------------------------------------------------
+Rules:
+  # Terraform: terraform_data.weights_guard. Never leave the hostname without traffic by mistake:
+  # when at least one backend is published, at least one published backend has a weight above 0.
+  WeightsGuard:
+    RuleCondition: !Or
+      - !And [!Not [!Equals [!Ref SlsDnsName, '']], !Not [!Equals [!Ref SlsHostedZoneId, '']]]
+      - !And [!Not [!Equals [!Ref EcsDnsName, '']], !Not [!Equals [!Ref EcsHostedZoneId, '']]]
+      - !And [!Not [!Equals [!Ref EksDnsName, '']], !Not [!Equals [!Ref EksHostedZoneId, '']]]
+      - !And [!Not [!Equals [!Ref Ec2DnsName, '']], !Not [!Equals [!Ref Ec2HostedZoneId, '']]]
+    Assertions:
+      - Assert: !Or
+          - !And [!Not [!Equals [!Ref SlsDnsName, '']], !Not [!Equals [!Ref SlsHostedZoneId, '']], !Not [!Equals [!Ref SlsWeight, '0']]]
+          - !And [!Not [!Equals [!Ref EcsDnsName, '']], !Not [!Equals [!Ref EcsHostedZoneId, '']], !Not [!Equals [!Ref EcsWeight, '0']]]
+          - !And [!Not [!Equals [!Ref EksDnsName, '']], !Not [!Equals [!Ref EksHostedZoneId, '']], !Not [!Equals [!Ref EksWeight, '0']]]
+          - !And [!Not [!Equals [!Ref Ec2DnsName, '']], !Not [!Equals [!Ref Ec2HostedZoneId, '']], !Not [!Equals [!Ref Ec2Weight, '0']]]
+        AssertDescription: Every published backend has weight 0. Set at least one of API_WEIGHT_SLS, API_WEIGHT_ECS, API_WEIGHT_EKS or API_WEIGHT_EC2 above 0.
+
+Conditions:
+  IsWsHostEnabled: !Equals [!Ref WsHostEnabled, 'true']
+  IsSlsActive: !And [!Not [!Equals [!Ref SlsDnsName, '']], !Not [!Equals [!Ref SlsHostedZoneId, '']]]
+  IsEcsActive: !And [!Not [!Equals [!Ref EcsDnsName, '']], !Not [!Equals [!Ref EcsHostedZoneId, '']]]
+  IsEksActive: !And [!Not [!Equals [!Ref EksDnsName, '']], !Not [!Equals [!Ref EksHostedZoneId, '']]]
+  IsEc2Active: !And [!Not [!Equals [!Ref Ec2DnsName, '']], !Not [!Equals [!Ref Ec2HostedZoneId, '']]]
+  IsWsRecordEnabled: !And
+    - !Condition IsWsHostEnabled
+    - !Not [!Equals [!Ref WsDnsName, '']]
+    - !Not [!Equals [!Ref WsHostedZoneId, '']]
+
+Resources:
+  # ----------------------------------------------------------------------------
+  # api.<web domain>: regional ACM certificate (Terraform main.tf)
+  # DNS validation is automatic: with HostedZoneId, CloudFormation writes the validation CNAME in
+  # the zone and the resource completes only when the certificate is ISSUED (Terraform:
+  # aws_route53_record.validation + aws_acm_certificate_validation.api).
+  # ----------------------------------------------------------------------------
+  ApiCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Sub 'api.${WebDomainName}'
+      ValidationMethod: DNS # Automatic renewal (ACM-01)
+      KeyAlgorithm: RSA_2048
+      DomainValidationOptions:
+        - DomainName: !Sub 'api.${WebDomainName}'
+          HostedZoneId: !Ref ZoneId
+      # ACM certificates have no name attribute: the convention goes in the Name tag.
+      Tags:
+        - Key: Name
+          Value: !Sub 'acm-${StrippedRegion}-${Context}-api-${EnvironmentType}'
+
+  # Contract with the backend repositories: they read the ARN from this parameter.
+  # A certificate ARN is an identifier, not a secret: plain String, standard tier.
+  ApiCertificateArnParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub '/${Context}/${EnvironmentType}/api-certificate-arn'
+      Description: !Sub 'ARN of the regional ACM certificate for api.${WebDomainName}'
+      Type: String
+      Tier: Standard
+      Value: !Ref ApiCertificate
+      Tags:
+        Name: !Sub 'ssm-${StrippedRegion}-${Context}-api-certificate-arn-${EnvironmentType}'
+
+  # ----------------------------------------------------------------------------
+  # Expiry alerts (Terraform monitoring.tf, team standard ACM-03). No customer key on the topic:
+  # an AWS managed key (alias/aws/sns) would block CloudWatch from publishing to it.
+  # ----------------------------------------------------------------------------
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub 'sns-${StrippedRegion}-${Context}-api-alerts-${EnvironmentType}'
+
+  AlertsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref AlertsTopic
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudWatchAlarms
+            Effect: Allow
+            Principal:
+              Service: cloudwatch.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref AlertsTopic
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: sns:Publish
+            Resource: !Ref AlertsTopic
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  AlertsEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # One alarm per threshold (Terraform: for_each over certificate_expiry_alert_days).
+  Fn::ForEach::ApiCertificateExpiryAlarms:
+    - Days
+    - !Ref CertificateExpiryAlertDays
+    - ApiCertExpiry${Days}dAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Properties:
+          AlarmName: !Sub 'alrm-${StrippedRegion}-${Context}-api-cert-expiry-${Days}d-${EnvironmentType}'
+          AlarmDescription: !Sub 'Certificate of api.${WebDomainName} expires in ${Days} days or less. DNS-validated certificates renew by themselves: check the validation CNAME if this does not clear.'
+          Namespace: AWS/CertificateManager
+          MetricName: DaysToExpiry
+          Dimensions:
+            - Name: CertificateArn
+              Value: !Ref ApiCertificate
+          Statistic: Minimum
+          Period: 86400
+          EvaluationPeriods: 1
+          ComparisonOperator: LessThanOrEqualToThreshold
+          Threshold: !Ref Days
+          TreatMissingData: notBreaching
+          AlarmActions:
+            - !Ref AlertsTopic
+          OKActions:
+            - !Ref AlertsTopic
+
+  # ----------------------------------------------------------------------------
+  # Weighted A alias records of api.<web domain> (Terraform records.tf, aws_route53_record.api).
+  # One record per published backend; set identifier = backend name. EvaluateTargetHealth is false
+  # on purpose: it would hide a failing backend silently. Alias records inherit the target's TTL.
+  # ----------------------------------------------------------------------------
+  ApiRecordSls:
+    Type: AWS::Route53::RecordSet
+    Condition: IsSlsActive
+    Properties:
+      HostedZoneId: !Ref ZoneId
+      Name: !Sub 'api.${WebDomainName}'
+      Type: A
+      SetIdentifier: sls
+      Weight: !Ref SlsWeight
+      AliasTarget:
+        DNSName: !Ref SlsDnsName
+        HostedZoneId: !Ref SlsHostedZoneId
+        EvaluateTargetHealth: false
+
+  ApiRecordEcs:
+    Type: AWS::Route53::RecordSet
+    Condition: IsEcsActive
+    Properties:
+      HostedZoneId: !Ref ZoneId
+      Name: !Sub 'api.${WebDomainName}'
+      Type: A
+      SetIdentifier: ecs
+      Weight: !Ref EcsWeight
+      AliasTarget:
+        DNSName: !Ref EcsDnsName
+        HostedZoneId: !Ref EcsHostedZoneId
+        EvaluateTargetHealth: false
+
+  ApiRecordEks:
+    Type: AWS::Route53::RecordSet
+    Condition: IsEksActive
+    Properties:
+      HostedZoneId: !Ref ZoneId
+      Name: !Sub 'api.${WebDomainName}'
+      Type: A
+      SetIdentifier: eks
+      Weight: !Ref EksWeight
+      AliasTarget:
+        DNSName: !Ref EksDnsName
+        HostedZoneId: !Ref EksHostedZoneId
+        EvaluateTargetHealth: false
+
+  ApiRecordEc2:
+    Type: AWS::Route53::RecordSet
+    Condition: IsEc2Active
+    Properties:
+      HostedZoneId: !Ref ZoneId
+      Name: !Sub 'api.${WebDomainName}'
+      Type: A
+      SetIdentifier: ec2
+      Weight: !Ref Ec2Weight
+      AliasTarget:
+        DNSName: !Ref Ec2DnsName
+        HostedZoneId: !Ref Ec2HostedZoneId
+        EvaluateTargetHealth: false
+
+  # ----------------------------------------------------------------------------
+  # ws.<web domain> (Terraform ws.tf): own certificate, SSM pointer, expiry alarms and one simple
+  # A alias record. Everything behind WsHostEnabled (true in dev, false in prod).
+  # ----------------------------------------------------------------------------
+  WsCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: IsWsHostEnabled
+    Properties:
+      DomainName: !Sub 'ws.${WebDomainName}'
+      ValidationMethod: DNS # Automatic renewal (ACM-01)
+      KeyAlgorithm: RSA_2048
+      DomainValidationOptions:
+        - DomainName: !Sub 'ws.${WebDomainName}'
+          HostedZoneId: !Ref ZoneId
+      Tags:
+        - Key: Name
+          Value: !Sub 'acm-${StrippedRegion}-${Context}-ws-${EnvironmentType}'
+
+  # Contract with the WebSocket repository. The value is the issued certificate.
+  WsCertificateArnParameter:
+    Type: AWS::SSM::Parameter
+    Condition: IsWsHostEnabled
+    Properties:
+      Name: !Sub '/${Context}/${EnvironmentType}/ws-certificate-arn'
+      Description: !Sub 'ARN of the regional ACM certificate for ws.${WebDomainName}'
+      Type: String
+      Tier: Standard
+      Value: !Ref WsCertificate
+      Tags:
+        Name: !Sub 'ssm-${StrippedRegion}-${Context}-ws-certificate-arn-${EnvironmentType}'
+
+  # Same topic as the api alarms; no new subscription.
+  Fn::ForEach::WsCertificateExpiryAlarms:
+    - Days
+    - !Ref CertificateExpiryAlertDays
+    - WsCertExpiry${Days}dAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Condition: IsWsHostEnabled
+        Properties:
+          AlarmName: !Sub 'alrm-${StrippedRegion}-${Context}-ws-cert-expiry-${Days}d-${EnvironmentType}'
+          AlarmDescription: !Sub 'Certificate of ws.${WebDomainName} expires in ${Days} days or less. DNS-validated certificates renew by themselves: check the validation CNAME if this does not clear.'
+          Namespace: AWS/CertificateManager
+          MetricName: DaysToExpiry
+          Dimensions:
+            - Name: CertificateArn
+              Value: !Ref WsCertificate
+          Statistic: Minimum
+          Period: 86400
+          EvaluationPeriods: 1
+          ComparisonOperator: LessThanOrEqualToThreshold
+          Threshold: !Ref Days
+          TreatMissingData: notBreaching
+          AlarmActions:
+            - !Ref AlertsTopic
+          OKActions:
+            - !Ref AlertsTopic
+
+  # Simple record (no weight, no set identifier); only when the switch is on and the WebSocket
+  # backend published both registry parameters.
+  WsRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: IsWsRecordEnabled
+    Properties:
+      HostedZoneId: !Ref ZoneId
+      Name: !Sub 'ws.${WebDomainName}'
+      Type: A
+      AliasTarget:
+        DNSName: !Ref WsDnsName
+        HostedZoneId: !Ref WsHostedZoneId
+        EvaluateTargetHealth: false
+
+# Same information as the Terraform outputs. No exports: consumers read the SSM contracts.
+Outputs:
+  CertificateArn:
+    Description: ARN of the issued regional certificate for the API hostname
+    Value: !Ref ApiCertificate
+
+  ApiDomainName:
+    Description: Shared API hostname
+    Value: !Sub 'api.${WebDomainName}'
+
+  # Terraform output active_backends (name -> weight), one output per backend with a record.
+  ActiveBackendSlsWeight:
+    Condition: IsSlsActive
+    Description: Weight of the sls backend (it has a weighted record)
+    Value: !Ref SlsWeight
+  ActiveBackendEcsWeight:
+    Condition: IsEcsActive
+    Description: Weight of the ecs backend (it has a weighted record)
+    Value: !Ref EcsWeight
+  ActiveBackendEksWeight:
+    Condition: IsEksActive
+    Description: Weight of the eks backend (it has a weighted record)
+    Value: !Ref EksWeight
+  ActiveBackendEc2Weight:
+    Condition: IsEc2Active
+    Description: Weight of the ec2 backend (it has a weighted record)
+    Value: !Ref Ec2Weight
+
+  WsCertificateArn:
+    Condition: IsWsHostEnabled
+    Description: ARN of the issued regional certificate for the WebSocket hostname
+    Value: !Ref WsCertificate
+
+  WsDomainName:
+    Condition: IsWsHostEnabled
+    Description: WebSocket hostname
+    Value: !Sub 'ws.${WebDomainName}'

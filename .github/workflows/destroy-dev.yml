@@ -74,6 +74,21 @@ jobs:
           fi
           echo "Mode: $MODE"
 
+      # Lock between the two IaC tools: the environment variable IAC_TOOL (terraform when unset |
+      # cloudformation) says which tool owns dev. This Terraform destroy runs only when it is terraform.
+      - name: Check the IaC tool of the environment
+        env:
+          IAC_TOOL: ${{ vars.IAC_TOOL }}
+          TARGET: dev
+        run: |
+          case "${IAC_TOOL:-terraform}" in
+            terraform) echo "IAC_TOOL: terraform" ;;
+            *)
+              echo "::error::IAC_TOOL is '$IAC_TOOL' in the '$TARGET' GitHub environment: it is not managed with Terraform. Nothing was planned or destroyed. Destroy the stack with .github/workflows-local/destroy-dev.sh."
+              exit 1
+              ;;
+          esac
+
       - name: Validate environment configuration
         env:
           AWS_REGION: ${{ vars.AWS_REGION }}

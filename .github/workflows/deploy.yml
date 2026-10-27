@@ -58,6 +58,21 @@ jobs:
               ;;
           esac
 
+      # Lock between the two IaC tools: the environment variable IAC_TOOL (terraform when unset |
+      # cloudformation) says which tool owns ${{ inputs.environment }}. Terraform runs only when it is terraform.
+      - name: Check the IaC tool of the environment
+        env:
+          IAC_TOOL: ${{ vars.IAC_TOOL }}
+          TARGET: ${{ inputs.environment }}
+        run: |
+          case "${IAC_TOOL:-terraform}" in
+            terraform) echo "IAC_TOOL: terraform" ;;
+            *)
+              echo "::error::IAC_TOOL is '$IAC_TOOL' in the '$TARGET' GitHub environment: it is not managed with Terraform. Nothing was planned or applied. Deploy with .github/workflows-local/deploy-dev.sh, or set IAC_TOOL back to terraform after destroying the stack."
+              exit 1
+              ;;
+          esac
+
       - name: Validate environment configuration
         working-directory: environments/${{ inputs.environment }}
         env:
@@ -133,8 +148,8 @@ jobs:
           set -o pipefail
           terragrunt show -json tfplan > "$RUNNER_TEMP/plan.json"
           python3 "$GITHUB_WORKSPACE/scripts/plan_guard.py" check "$RUNNER_TEMP/plan.json" | tee "$RUNNER_TEMP/guard.md"
-          # Retired backends (if any) are shown in the job summary.
-          grep -q '^### Retired backends' "$RUNNER_TEMP/guard.md" && cat "$RUNNER_TEMP/guard.md" >> "$GITHUB_STEP_SUMMARY" || true
+          # Retired backends and expiry alarms (if any) are shown in the job summary.
+          grep -q '^### Retired' "$RUNNER_TEMP/guard.md" && cat "$RUNNER_TEMP/guard.md" >> "$GITHUB_STEP_SUMMARY" || true
 
       - name: Terragrunt Apply
         working-directory: environments/${{ inputs.environment }}/api-hostname

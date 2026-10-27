@@ -20,6 +20,9 @@ override.tf.json
 **/*.tfplan
 **/tfplan
 
+# Local CloudFormation deploy helpers (kept on this machine only)
+.github/workflows-local/
+
 # Local secrets (ROUTE53_ZONE_ID and weights when running Terragrunt by hand)
 **/secrets.yml
 
