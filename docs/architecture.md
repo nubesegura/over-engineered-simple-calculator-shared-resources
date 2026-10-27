@@ -16,7 +16,7 @@ Diagram: `docs/architecture.drawio`.
 | Weighted Route 53 alias records | One `A` alias per backend that published its target; the weight (0-255) splits the traffic |
 | Backend registry (SSM, read only) | `/oecalc/<env>/api-backends/<name>/{dns-name,hosted-zone-id}`, published by each backend |
 | SNS topic, policy and email subscription | Receives the expiry alarms; the policy allows CloudWatch to publish and denies insecure transport |
-| 4 CloudWatch alarms | `DaysToExpiry` of the certificate below 90, 60, 30 and 15 days |
+| 2 CloudWatch alarms | `DaysToExpiry` of the certificate at or below 30 and 7 days |
 | Weights guard (`terraform_data`) | Refuses a plan where every published backend has weight 0 |
 
 ## Resource inventory
@@ -35,7 +35,7 @@ Names are identical in `dev` and `prod` except for the last segment and the doma
 | `aws_sns_topic.alerts` | `sns-useast2-oecalc-api-alerts-<env>` | no customer key (an AWS managed key would block CloudWatch) |
 | `aws_sns_topic_policy.alerts` | same topic | statements `AllowCloudWatchAlarms` (source account condition) and `DenyInsecureTransport` |
 | `aws_sns_topic_subscription.alerts_email` | email endpoint from `SUPPORT_EMAIL` | the recipient must confirm it |
-| `aws_cloudwatch_metric_alarm.certificate_expiry["90"/"60"/"30"/"15"]` | `alrm-useast2-oecalc-api-cert-expiry-<days>d-<env>` | `AWS/CertificateManager` `DaysToExpiry`, minimum, period 1 day, missing data not breaching |
+| `aws_cloudwatch_metric_alarm.certificate_expiry["30"/"7"]` | `alrm-useast2-oecalc-api-cert-expiry-<days>d-<env>` | `AWS/CertificateManager` `DaysToExpiry`, minimum, period 1 day, missing data not breaching |
 
 Tags on every resource (provider default tags from `environments/root.hcl`): `team-owner = nube-segura`,
 `project-name = over-engineered-calculator`, `app-name = calc-shared`,

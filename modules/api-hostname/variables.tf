@@ -45,6 +45,11 @@ variable "backends" {
     condition     = alltrue([for name, weight in var.backends : can(regex("^[a-z0-9-]+$", name)) && weight >= 0 && weight <= 255 && weight == floor(weight)])
     error_message = "Backend names must be lowercase letters, digits or hyphens, and weights integers from 0 to 255."
   }
+
+  validation {
+    condition     = !contains(keys(var.backends), "ws")
+    error_message = "The backend name 'ws' is not allowed here: ws.<web domain> is a separate host with its own certificate and a simple record, never a weighted backend of the api host."
+  }
 }
 
 variable "alert_email" {
@@ -59,6 +64,12 @@ variable "alert_email" {
 
 variable "certificate_expiry_alert_days" {
   type        = list(number)
-  default     = [90, 60, 30, 15]
-  description = "Days before expiry at which an alarm fires (ACM-03)"
+  default     = [30, 7]
+  description = "Days before expiry at which an alarm fires (ACM-03: exactly 30 and 7). Alarms of any other threshold are not part of the standard."
+}
+
+variable "ws_host_enabled" {
+  type        = bool
+  default     = false
+  description = "Create the ws.<web domain> certificate, its SSM pointer and expiry alarms. Explicit per-environment switch (true in dev, false in prod), set in env.hcl."
 }

@@ -20,6 +20,11 @@ locals {
   # Certificate expiry alarms. GitHub environment secret SUPPORT_EMAIL.
   alert_email = get_env("SUPPORT_EMAIL", try(local.local_secrets.SUPPORT_EMAIL, "alerts-prod@example.com"))
 
+  # --- WebSocket host ---
+  # Certificate, SSM pointer and expiry alarms for ws.<web_domain_name>. Explicit switch, not
+  # derived from the environment name.
+  ws_host_enabled = false
+
   # --- API backends ---
   # Routing weights (0-255) of the backends behind api.<web_domain_name>, from the GitHub
   # environment variables API_WEIGHT_<NAME>. An unset or non-numeric variable counts as 0; a

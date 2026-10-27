@@ -10,7 +10,7 @@ redeploys the web page, and a new backend is added in one place.
   `/oecalc/<env>/api-certificate-arn` (the backends read it).
 - Weighted Route 53 alias records, one per backend that published its target in
   `/oecalc/<env>/api-backends/<name>/{dns-name,hosted-zone-id}`.
-- Certificate expiry alarms (90, 60, 30 and 15 days) and their SNS topic with an email subscription.
+- Certificate expiry alarms (30 and 7 days) and their SNS topic with an email subscription.
 
 Not here: the web page and Cognito (`over-engineered-simple-calculator-webpage`), the backends, the
 account foundation (deployment roles, state bucket, hosted zone).

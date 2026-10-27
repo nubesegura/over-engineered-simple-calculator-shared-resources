@@ -4,6 +4,11 @@
 check    Owner rule (2026-10-06): a plan that deletes or replaces anything is refused, EXCEPT a pure
          delete (actions exactly ["delete"]) of an aws_route53_record.api[...] whose set_identifier is
          not kept by any other record of the plan. That is a backend that is no longer published.
+         One more exception (spec 002): the pure delete of the single `ws` host record (WS_RECORD_ADDRESS),
+         unless the same plan also creates or updates it.
+         One more exception (owner decision 2026-10-26, ACM-03 now 30 and 7 days): the pure delete of the
+         retired expiry alarms (thresholds 90, 60 and 15) of the api or ws certificate. The 30 and 7 day
+         alarms are never deletable.
          Exit 0 = allowed, 1 = refused or unreadable plan. Retired backends go to stdout (markdown).
 summary  Classifies a non-empty plan for the drift check: backend retired, backend new, weights
          changed, other drift. Exit 0 on a readable plan, 1 on an unreadable one.
@@ -14,6 +19,14 @@ import sys
 
 RECORD_PREFIX = "aws_route53_record.api["
 WEIGHTS_GUARD = "terraform_data.weights_guard"
+# The one simple alias record of the WebSocket host. Keep in sync with modules/api-hostname/ws.tf.
+WS_RECORD_ADDRESS = "aws_route53_record.ws[0]"
+WS_LABEL = "ws"
+# Expiry alarms retired when ACM-03 went from 90/60/30/15 to 30/7 days. Keep in sync with
+# modules/api-hostname (monitoring.tf, ws.tf). Only these keys may be deleted.
+ALARM_TYPE = "aws_cloudwatch_metric_alarm"
+ALARM_PREFIXES = ("aws_cloudwatch_metric_alarm.certificate_expiry[", "aws_cloudwatch_metric_alarm.ws_certificate_expiry[")
+RETIRED_ALARM_KEYS = ("90", "60", "15")
 
 
 class PlanError(Exception):
@@ -43,6 +56,27 @@ def is_record(item):
     return item.get("type") == "aws_route53_record" and str(item.get("address", "")).startswith(RECORD_PREFIX)
 
 
+def is_ws_record(item):
+    return item.get("type") == "aws_route53_record" and item.get("address") == WS_RECORD_ADDRESS
+
+
+def ws_host(item):
+    """Host name of the ws record (from the plan) for the job summary; falls back to the label."""
+    for side in ("before", "after"):
+        name = (item["change"].get(side) or {}).get("name")
+        if isinstance(name, str) and name:
+            return name
+    return WS_LABEL
+
+
+def is_retired_alarm(item):
+    """Pure delete candidate: an expiry alarm of a retired threshold (api or ws certificate)."""
+    address = str(item.get("address", ""))
+    if item.get("type") != ALARM_TYPE or item["change"]["actions"] != ["delete"]:
+        return False
+    return any(address in (f'{prefix}"{key}"]' for key in RETIRED_ALARM_KEYS) for prefix in ALARM_PREFIXES)
+
+
 def set_id(item, side):
     """set_identifier of a record; falls back to the for_each key (set_identifier = each.key)."""
     value = (item["change"].get(side) or {}).get("set_identifier")
@@ -59,7 +93,16 @@ def classify(changes):
     for item in changes:
         actions = item["change"]["actions"]
         address = item.get("address", "?")
-        if is_record(item) and actions == ["delete"]:
+        if is_ws_record(item):
+            if actions == ["delete"]:
+                retired[WS_LABEL] = address
+            elif "delete" in actions:
+                others.append(address)
+            elif actions not in (["read"], ["no-op"]):
+                kept.add(WS_LABEL)
+        elif is_retired_alarm(item):
+            continue  # reported by retired_alarms()
+        elif is_record(item) and actions == ["delete"]:
             sid = set_id(item, "before")
             if sid is None:
                 others.append(address)
@@ -74,8 +117,14 @@ def classify(changes):
     return retired, kept, others
 
 
+def retired_alarms(changes):
+    return sorted(item["address"] for item in changes if is_retired_alarm(item))
+
+
 def check(path):
-    retired, kept, others = classify(load_changes(path))
+    changes = load_changes(path)
+    alarms = retired_alarms(changes)
+    retired, kept, others = classify(changes)
     refused = list(others)
     allowed = {}
     for sid, address in retired.items():
@@ -86,11 +135,17 @@ def check(path):
     if refused:
         print(f"::error::The plan deletes or replaces: {', '.join(refused)}")
         return 1
-    if allowed:
-        print("### Retired backends (records removed)")
-        for sid in sorted(allowed):
-            print(f"- {sid}: {allowed[sid]}")
-        print("")
+    if allowed or alarms:
+        if allowed:
+            print("### Retired backends (records removed)")
+            for sid in sorted(allowed):
+                print(f"- {sid}: {allowed[sid]}")
+            print("")
+        if alarms:
+            print("### Retired expiry alarms (removed)")
+            for address in alarms:
+                print(f"- {address}")
+            print("")
         print("No other delete and no replacement in the saved plan")
     else:
         print("No delete and no replacement in the saved plan")
@@ -106,13 +161,24 @@ def only_weight_changed(before, after):
 def summary(path):
     changes = load_changes(path)
     retired, _, _ = classify(changes)
+    alarms = set(retired_alarms(changes))
+    retired_names = [ws_host(i) for i in changes if is_ws_record(i) and i["change"]["actions"] == ["delete"]]
+    retired_names += [sid for sid in retired if sid != WS_LABEL]
     new, weights, other = [], [], []
     for item in changes:
         actions = item["change"]["actions"]
         if actions in (["no-op"], ["read"]):
             continue
         address = item.get("address", "?")
-        if is_record(item):
+        if address in alarms:
+            continue  # retired expiry alarm: reported by check
+        if is_ws_record(item):
+            if actions == ["create"]:
+                new.append(ws_host(item))
+            elif actions != ["delete"]:
+                other.append(f"{address} ({'+'.join(actions)})")
+            continue
+        elif is_record(item):
             if actions == ["delete"]:
                 continue  # listed as retired
             if actions == ["create"]:
@@ -126,7 +192,7 @@ def summary(path):
             continue  # its input is the sum of the weights: it follows the records
         other.append(f"{address} ({'+'.join(actions)})")
     print("### Drift classification")
-    for title, rows in (("Backend retired (records to remove)", sorted(retired)),
+    for title, rows in (("Backend retired (records to remove)", sorted(retired_names)),
                         ("Backend new (records to add)", sorted(new)),
                         ("Weights changed", sorted(weights)),
                         ("Other drift", sorted(other))):

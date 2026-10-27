@@ -15,4 +15,5 @@ inputs = {
   zone_id         = local.env_vars.locals.route53_zone_id
   backends        = local.env_vars.locals.api_backends
   alert_email     = local.env_vars.locals.alert_email
+  ws_host_enabled = local.env_vars.locals.ws_host_enabled
 }
