@@ -50,6 +50,7 @@ reviewed manual run. A daily drift check (dev) reports differences without apply
 - [Architecture](docs/architecture.md): components, resource inventory, flows, deployment order, trust boundaries.
 - [Technical guide](docs/technical.md): state keys, variables, workflows, adding a backend, switching weights.
 - [ADR 0001](docs/adr/0001-api-edge-in-a-shared-repository.md): why the API edge lives here.
+- [ADR 0002](docs/adr/0002-ai-custom-domain-host.md): dedicated ACM certificate and DNS alias for the AI backend host.
 - [Migrations](docs/migrations/README.md): how resources are moved between Terraform states.
 
 ## Destroying the dev environment

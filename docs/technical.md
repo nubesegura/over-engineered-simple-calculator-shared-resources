@@ -83,6 +83,44 @@ DNS caches converge within the target TTL. The module fails the plan if all publ
    the deploy. The module drops the weighted record of that backend and the guard allows exactly that delete.
 3. If the remaining backends all have weight 0, the weights guard fails: set `API_WEIGHT_<NAME>` of a remaining one first.
 
+## `ai` host (AI backend)
+
+The AI backend (`over-engineered-simple-calculator-ai-version`) exposes a REST API via custom domain `ai.<web domain>` in `dev` (CloudFormation stack `oecalc-shared-api-hostname-dev`, parameter `AiHostEnabled=true`). The resources are managed independently from the weighted API backends (`sls`, `ecs`, `eks`, `ec2`).
+
+### SSM contracts
+
+| Parameter | Type | Owner / Writer | Reader | Description |
+|---|---|---|---|---|
+| `/oecalc/<env>/ai-certificate-arn` | String (Standard) | `shared-resources` | AI backend | ARN of the dedicated regional ACM certificate `ai.<web domain>`. Created after issuance. Identifier, not a secret. If missing or empty, the `ai` host is not yet deployed in that environment. |
+| `/oecalc/<env>/api-backends/ai/dns-name` | String (Standard) | AI backend | `shared-resources` | Regional domain name of the API Gateway custom domain. Contains `none` while custom domain is disabled. |
+| `/oecalc/<env>/api-backends/ai/hosted-zone-id` | String (Standard) | AI backend | `shared-resources` | Hosted zone ID of the regional API Gateway target. Contains `none` while custom domain is disabled. |
+| `/oecalc/<env>/api-backends/ai/api-id` | String (Standard) | AI backend | (Information only) | Published by AI backend; not consumed by `shared-resources`. |
+
+### The `none` sentinel and target guards
+
+While the AI backend runs without a custom domain, it publishes the sentinel string `none` in both `dns-name` and `hosted-zone-id`. To prevent invalid Route 53 alias records:
+- **CloudFormation condition:** `IsAiRecordEnabled` evaluates to `true` only when `AiHostEnabled` is `true` AND neither `AiDnsName` nor `AiHostedZoneId` is empty (`''`) or equal to `none`.
+- **Deploy helper (`.github/workflows-local/lib/cfn_local.py`):** Normalizes `none` (case-insensitive, trimmed) to empty. If values are provided, it strictly checks syntax (DNS name contains dot; hosted zone ID matches `^Z[A-Z0-9]+$`) and halts before calling AWS if malformed.
+- **Independence:** `ai` is excluded from the weighted backend tuple (`BACKENDS`); it is never included in weighted records or `WeightsGuard`.
+
+### Route 53 alias record
+
+When published with valid targets, `AiRecord` creates a simple `A` alias pointing to the regional API Gateway domain target with `EvaluateTargetHealth: false`. It is unweighted and completely isolated from the weighted API routing.
+
+### 4-step deployment sequence
+
+To prevent circular dependencies between `shared-resources` and `over-engineered-simple-calculator-ai-version`:
+
+1. **Step 1 (shared-resources):** Deploy CloudFormation stack with `AiHostEnabled=true` in `dev`. ACM requests `ai.<web domain>`, validates via Route 53 CNAME, creates parameter `/oecalc/<env>/ai-certificate-arn`, and creates two 30d/7d CloudWatch expiry alarms. `AiRecord` is skipped because the AI backend target is still `none`.
+2. **Step 2 (AI backend repo):** Verify that the certificate status in ACM is `ISSUED`. Deploy the AI backend stack with `EnableCustomDomain=true`, `CertificateArn` read from `/oecalc/<env>/ai-certificate-arn`, and `CustomDomainName=ai.<web domain>`. The backend creates its API Gateway domain name and updates the SSM target parameters with the real DNS name and hosted zone ID.
+3. **Step 3 (shared-resources):** Re-run deploy on `shared-resources`. The deploy script detects the published targets. The change set contains exactly one Add: `AiRecord`.
+4. **Step 4 (Verification):** Perform read-only verification: `ai.<web domain>` resolves to API Gateway; TLS handshake presents the `ai` certificate; an unauthenticated `POST` returns `401 Unauthorized`; and CloudWatch alarms remain green.
+
+### Retiring or disabling the `ai` host
+
+1. If the AI custom domain is disabled or destroyed, the AI backend resets its target parameters to `none` (or deletes them).
+2. Deploying `shared-resources` produces a change set with a single removal: `AiRecord`. The change set guard explicitly permits removing `AiRecord` while protecting the certificate, parameter, and alarms from unexpected deletion or replacement.
+
 ## Move resources between states
 
 See [migrations](migrations/README.md). Summary: import in the new owner, then `removed` with `destroy = false` in the

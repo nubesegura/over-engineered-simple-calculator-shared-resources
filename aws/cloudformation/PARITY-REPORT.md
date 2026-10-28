@@ -47,25 +47,31 @@ The template creates the same resources, with the same names, SSM contracts and 
 | `aws_ssm_parameter.ws_certificate_arn[0]` | `WsCertificateArnParameter` | `AWS::SSM::Parameter` | `/oecalc/<env>/ws-certificate-arn`, Condition `IsWsHostEnabled` |
 | `aws_cloudwatch_metric_alarm.ws_certificate_expiry[...]` | `WsCertExpiry{30,7}dAlarm` | `AWS::CloudWatch::Alarm` | Condition `IsWsHostEnabled`; same topic, no new subscription |
 | `aws_route53_record.ws[0]` | `WsRecord` | `AWS::Route53::RecordSet` | Simple A alias; Condition `IsWsRecordEnabled` (switch on and both ws registry values present) |
+| `(absent in Terraform - deviation D1)` | `AiCertificate` | `AWS::CertificateManager::Certificate` | Condition `IsAiHostEnabled`; tag `Name=acm-useast2-oecalc-ai-<env>`. CloudFormation-only gap (deviation D1, spec 003) |
+| `(absent in Terraform - deviation D1)` | (owned by `AiCertificate`) | - | DNS validation records written by CloudFormation |
+| `(absent in Terraform - deviation D1)` | `AiCertificateArnParameter` | `AWS::SSM::Parameter` | `/oecalc/<env>/ai-certificate-arn`, Condition `IsAiHostEnabled`. CloudFormation-only gap (deviation D1, spec 003) |
+| `(absent in Terraform - deviation D1)` | `AiCertExpiry{30,7}dAlarm` | `AWS::CloudWatch::Alarm` | Condition `IsAiHostEnabled`; same topic, no new subscription. CloudFormation-only gap (deviation D1, spec 003) |
+| `(absent in Terraform - deviation D1)` | `AiRecord` | `AWS::Route53::RecordSet` | Simple A alias; Condition `IsAiRecordEnabled` (switch on and both ai registry values present and not `'none'`). CloudFormation-only gap (deviation D1, spec 003) |
 
 Outputs: `certificate_arn` -> `CertificateArn`; `api_domain_name` -> `ApiDomainName`; `active_backends` (map) ->
 `ActiveBackend<Name>Weight` (one per backend with a record); `ws_certificate_arn` -> `WsCertificateArn`;
-`ws_domain_name` -> `WsDomainName` (both only when `WsHostEnabled`). No `Export`: consumers read the SSM contracts.
+`ws_domain_name` -> `WsDomainName` (both only when `WsHostEnabled`); `ai_certificate_arn` -> `AiCertificateArn`;
+`ai_domain_name` -> `AiDomainName` (both only when `AiHostEnabled`). No `Export`: consumers read the SSM contracts.
 
-### Resource count per type (dev: ws on, every backend and ws published)
+### Resource count per type (dev: ws and ai on, every backend, ws and ai published)
 
 | Type | Terraform | CloudFormation | Difference |
 |---|---|---|---|
-| ACM certificate | 2 | 2 | - |
+| ACM certificate | 2 | 3 | +1 (AiCertificate, gap D1) |
 | ACM certificate validation | 2 | 0 | Built into the certificate resource |
 | Route 53 record (validation CNAME) | 2 | 0 | Written by CloudFormation, not a stack resource |
-| Route 53 record (api weighted + ws) | 5 | 5 | - |
-| SSM parameter | 2 | 2 | - |
+| Route 53 record (api weighted + ws + ai) | 5 | 6 | +1 (AiRecord, gap D1) |
+| SSM parameter | 2 | 3 | +1 (AiCertificateArnParameter, gap D1) |
 | SNS topic / policy / subscription | 1 / 1 / 1 | 1 / 1 / 1 | - |
-| CloudWatch alarm | 8 | 8 | - |
+| CloudWatch alarm | 8 | 10 | +2 (AiCertExpiry30d/7dAlarm, gap D1) |
 | `terraform_data` | 1 | 0 | `Rules` section |
 
-Prod (`WsHostEnabled=false`): the ws certificate, parameter, 2 alarms and record are absent in both tools.
+Prod (`WsHostEnabled=false`, `AiHostEnabled=false`): the ws and ai certificates, parameters, alarms and records are absent in both tools.
 
 ## 4. Behavior differences and gaps
 
@@ -103,6 +109,13 @@ Prod (`WsHostEnabled=false`): the ws certificate, parameter, 2 alarms and record
    removal stay refused. The 30 day alarm changes operator in place (no replacement).
 9. **Tags.** The 5 mandatory tags are stack tags (propagated). `Name` tags on the certificates and SSM parameters are
    in the template, like Terraform. Route 53 records and the subscription have no tags in either tool.
+10. **`ai` host (CloudFormation-only gap, deviation D1).** Spec 003 added the `ai.<web domain>` host resources
+    (`AiCertificate`, `AiCertificateArnParameter`, `AiCertExpiry30dAlarm`, `AiCertExpiry7dAlarm`, and `AiRecord`) only
+    to the CloudFormation template under `AiHostEnabled` (`dev` only). The Terraform twin (`modules/api-hostname`) was
+    intentionally left untouched (accepted deviation D1), because `dev` is owned exclusively by CloudFormation
+    (`IAC_TOOL=cloudformation`). If dev is ever switched back to Terraform, the `ai` resources would be absent and would
+    have to be ported or imported. The owner will record a follow-up decision on whether to build the Terraform twin or
+    permanently standardize on CloudFormation.
 
 ## 5. One tool per environment
 
