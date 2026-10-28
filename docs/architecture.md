@@ -48,6 +48,25 @@ state key `over-engineered-simple-calculator-shared-resources/<env>/api-hostname
 
 Outputs: `certificate_arn`, `api_domain_name`, `active_backends` (name to weight).
 
+### `ai` host (spec 003, `dev` only, CloudFormation only)
+
+Third public host `ai.<web domain>` for the AI backend. These resources exist only in the CloudFormation template
+(`aws/cloudformation/template.yaml`); the Terraform module does not manage them (accepted deviation D1). All are
+behind `AiHostEnabled` (`true` in dev, `false` in prod, set explicitly in `parameters/<env>-us-east-2.json`).
+
+| Logical resource | Name or identifier (dev) | Notes |
+|---|---|---|
+| `AiCertificate` (ACM) | domain `ai.<web domain>`; tag `Name = acm-useast2-oecalc-ai-dev` | DNS validated by CloudFormation (`HostedZoneId`), RSA 2048, automatic renewal |
+| `AiCertificateArnParameter` (SSM) | `/oecalc/dev/ai-certificate-arn` (String, Standard) | tag `Name = ssm-useast2-oecalc-ai-certificate-arn-dev`; value is the certificate reference, so it exists only after issuance; identifier, not a secret; read by the AI backend |
+| `AiCertExpiry30dAlarm`, `AiCertExpiry7dAlarm` | `alrm-useast2-oecalc-ai-cert-expiry-<days>d-dev` | `AWS/CertificateManager` `DaysToExpiry`, minimum, period 1 day, missing data not breaching; actions to the existing alerts topic |
+| `AiRecord` (Route 53) | `ai.<web domain>`, type `A`, simple alias | created only when `AiHostEnabled` is `true` and `api-backends/ai/dns-name` and `hosted-zone-id` are both present and neither is empty nor the literal `none`; target health evaluation off; never weighted |
+
+Contract with the AI backend: it reads `ai-certificate-arn` and publishes `/oecalc/<env>/api-backends/ai/{dns-name,hosted-zone-id}`
+(`none` while its custom domain is disabled; `api-id` is published but not read here). No new topic, subscription or role.
+Outputs: `AiCertificateArn`, `AiDomainName` (conditional on `AiHostEnabled`).
+Change set guard: `AiRecord` alone may be removed or retargeted in place; any other removal, replacement or modification of
+an `ai` resource is refused. The `ai` host diagram entry is added when the diagrams are regenerated at closing.
+
 ## Flows
 
 1. **Certificate:** Terraform requests the certificate, writes the validation CNAME in the hosted zone, waits for

@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::LanguageExtensions
 Description: >
-  Shared API edge of Over-Engineered Simple Calculator (api.<web domain> and ws.<web domain>).
+  Shared API edge of Over-Engineered Simple Calculator (api.<web domain>, ws.<web domain> and ai.<web domain>).
   Pure CloudFormation alternative to the Terraform / Terragrunt unit environments/<env>/api-hostname
   (module modules/api-hostname): same resource names, same SSM contracts, same alarms.
   Only ONE tool may own an environment at a time (see PARITY-REPORT.md).
@@ -9,10 +9,11 @@ Description: >
 # ---------------------------------------------------------------------------------------------------
 # Inputs
 #   Versioned (parameters/<env>-<region>.json): EnvironmentType, Context, StrippedRegion, WebDomainName,
-#     WsHostEnabled, CertificateExpiryAlertDays.
+#     WsHostEnabled, AiHostEnabled, CertificateExpiryAlertDays.
 #   Deploy time only (never in versioned files): ZoneId (ROUTE53_ZONE_ID), AlertEmail (SUPPORT_EMAIL),
 #     backend weights (API_WEIGHT_<NAME>) and the backend targets resolved from the SSM registry
-#     /<context>/<env>/api-backends/<name>/{dns-name,hosted-zone-id}. CloudFormation cannot list SSM
+#     /<context>/<env>/api-backends/<name>/{dns-name,hosted-zone-id} (names: sls, ecs, eks, ec2, ws, ai).
+#     CloudFormation cannot list SSM
 #     parameters by path nor skip a missing one, so the deploy script resolves them and passes them
 #     here; an empty value means "not published" and the record is not created.
 # ---------------------------------------------------------------------------------------------------
@@ -62,6 +63,12 @@ Parameters:
   WsHostEnabled:
     Type: String
     Description: Create the ws.<web domain> certificate, its SSM pointer, expiry alarms and record (true in dev, false in prod)
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+
+  AiHostEnabled:
+    Type: String
+    Description: Create the ai.<web domain> certificate, its SSM pointer, expiry alarms and record (true in dev, false in prod)
     Default: 'false'
     AllowedValues: ['true', 'false']
 
@@ -138,6 +145,18 @@ Parameters:
     Description: Value of /<context>/<env>/api-backends/ws/hosted-zone-id (empty when not published)
     Default: ''
 
+  # --- AI backend of ai.<web domain> (simple record, never weighted) ---
+  # The backend publishes the literal 'none' while its custom domain is disabled; the deploy helper
+  # turns it into an empty value, and the conditions below also reject it.
+  AiDnsName:
+    Type: String
+    Description: Value of /<context>/<env>/api-backends/ai/dns-name (empty when not published)
+    Default: ''
+  AiHostedZoneId:
+    Type: String
+    Description: Value of /<context>/<env>/api-backends/ai/hosted-zone-id (empty when not published)
+    Default: ''
+
 # ---------------------------------------------------------------------------------------------------
 # Guards evaluated before any resource changes (Terraform: variable validations and preconditions).
 # The check "the API hostname is a subdomain of the hosted zone" needs the zone name, which Rules
@@ -170,6 +189,14 @@ Conditions:
     - !Condition IsWsHostEnabled
     - !Not [!Equals [!Ref WsDnsName, '']]
     - !Not [!Equals [!Ref WsHostedZoneId, '']]
+  IsAiHostEnabled: !Equals [!Ref AiHostEnabled, 'true']
+  # 'none' is the backend's "not published" sentinel: never a record target.
+  IsAiRecordEnabled: !And
+    - !Condition IsAiHostEnabled
+    - !Not [!Equals [!Ref AiDnsName, '']]
+    - !Not [!Equals [!Ref AiDnsName, 'none']]
+    - !Not [!Equals [!Ref AiHostedZoneId, '']]
+    - !Not [!Equals [!Ref AiHostedZoneId, 'none']]
 
 Resources:
   # ----------------------------------------------------------------------------
@@ -404,6 +431,78 @@ Resources:
         HostedZoneId: !Ref WsHostedZoneId
         EvaluateTargetHealth: false
 
+  # ----------------------------------------------------------------------------
+  # ai.<web domain> (CloudFormation only, spec 003-ai-host; no Terraform twin): own certificate, SSM
+  # pointer, expiry alarms and one simple A alias record. Everything behind AiHostEnabled (true in
+  # dev, false in prod). Never part of the weighted api set.
+  # ----------------------------------------------------------------------------
+  AiCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: IsAiHostEnabled
+    Properties:
+      DomainName: !Sub 'ai.${WebDomainName}'
+      ValidationMethod: DNS # Automatic renewal (ACM-01)
+      KeyAlgorithm: RSA_2048
+      DomainValidationOptions:
+        - DomainName: !Sub 'ai.${WebDomainName}'
+          HostedZoneId: !Ref ZoneId
+      Tags:
+        - Key: Name
+          Value: !Sub 'acm-${StrippedRegion}-${Context}-ai-${EnvironmentType}'
+
+  # Contract with the AI repository. The value is the issued certificate.
+  AiCertificateArnParameter:
+    Type: AWS::SSM::Parameter
+    Condition: IsAiHostEnabled
+    Properties:
+      Name: !Sub '/${Context}/${EnvironmentType}/ai-certificate-arn'
+      Description: !Sub 'ARN of the regional ACM certificate for ai.${WebDomainName}'
+      Type: String
+      Tier: Standard
+      Value: !Ref AiCertificate
+      Tags:
+        Name: !Sub 'ssm-${StrippedRegion}-${Context}-ai-certificate-arn-${EnvironmentType}'
+
+  # Same topic as the api alarms; no new subscription.
+  Fn::ForEach::AiCertificateExpiryAlarms:
+    - Days
+    - !Ref CertificateExpiryAlertDays
+    - AiCertExpiry${Days}dAlarm:
+        Type: AWS::CloudWatch::Alarm
+        Condition: IsAiHostEnabled
+        Properties:
+          AlarmName: !Sub 'alrm-${StrippedRegion}-${Context}-ai-cert-expiry-${Days}d-${EnvironmentType}'
+          AlarmDescription: !Sub 'Certificate of ai.${WebDomainName} expires in ${Days} days or less. DNS-validated certificates renew by themselves: check the validation CNAME if this does not clear.'
+          Namespace: AWS/CertificateManager
+          MetricName: DaysToExpiry
+          Dimensions:
+            - Name: CertificateArn
+              Value: !Ref AiCertificate
+          Statistic: Minimum
+          Period: 86400
+          EvaluationPeriods: 1
+          ComparisonOperator: LessThanOrEqualToThreshold
+          Threshold: !Ref Days
+          TreatMissingData: notBreaching
+          AlarmActions:
+            - !Ref AlertsTopic
+          OKActions:
+            - !Ref AlertsTopic
+
+  # Simple record (no weight, no set identifier); only when the switch is on and the AI backend
+  # published two real registry values (not empty, not 'none').
+  AiRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: IsAiRecordEnabled
+    Properties:
+      HostedZoneId: !Ref ZoneId
+      Name: !Sub 'ai.${WebDomainName}'
+      Type: A
+      AliasTarget:
+        DNSName: !Ref AiDnsName
+        HostedZoneId: !Ref AiHostedZoneId
+        EvaluateTargetHealth: false
+
 # Same information as the Terraform outputs. No exports: consumers read the SSM contracts.
 Outputs:
   CertificateArn:
@@ -441,3 +540,13 @@ Outputs:
     Condition: IsWsHostEnabled
     Description: WebSocket hostname
     Value: !Sub 'ws.${WebDomainName}'
+
+  AiCertificateArn:
+    Condition: IsAiHostEnabled
+    Description: ARN of the issued regional certificate for the AI hostname
+    Value: !Ref AiCertificate
+
+  AiDomainName:
+    Condition: IsAiHostEnabled
+    Description: AI hostname
+    Value: !Sub 'ai.${WebDomainName}'

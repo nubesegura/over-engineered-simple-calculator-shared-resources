@@ -20,6 +20,10 @@
     "ParameterValue": "false"
   },
   {
+    "ParameterKey": "AiHostEnabled",
+    "ParameterValue": "false"
+  },
+  {
     "ParameterKey": "CertificateExpiryAlertDays",
     "ParameterValue": "30,7"
   }
