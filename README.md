@@ -34,9 +34,22 @@ refuses a plan where every published backend has weight 0. The deploy summary li
 
 | Path | Content |
 |---|---|
-| `modules/api-hostname/` | Terraform module (certificate, records, alarms) |
-| `environments/` | Terragrunt root, common unit and `dev` / `prod` settings (`env.hcl`) |
+| `aws/terraform/modules/api-hostname/` | Terraform module (certificate, records, alarms) |
+| `aws/terraform/environments/` | Terragrunt root (`root.hcl`), `common/` unit and, per environment, `env.hcl`, `_global/` and the active region `us-east-2/` (`region.hcl`, unit at `edge/api-hostname/`) |
+| `aws/cloudformation/` | CloudFormation twin of the module (`IAC_TOOL=cloudformation`, used by `dev`) |
+| `aws/scripts/` | `plan_guard.py`, `post_destroy_check.py` and their tests |
 | `.github/workflows/` | `ci.yml` and the deployment workflows (`develop` deploys `dev`, `main` deploys `prod`) |
+
+Cloud roots are isolated under `aws/` (an `azure/` root can be added later without touching it). Local-only helper scripts live in `.github/workflows-local/` and are not versioned, nor is the management-account parameters file. The local `secrets.yml` is read from `aws/terraform/environments/<env>/secrets.yml` (git-ignored).
+
+> **Before the first prod deployment (push to `main`, Terraform or CloudFormation):** the Terraform state key
+> changed when the unit moved under `aws/terraform/environments/<env>/us-east-2/edge/api-hostname/`.
+> Old key: `over-engineered-simple-calculator-shared-resources/prod/api-hostname/terraform.tfstate`.
+> New key: `over-engineered-simple-calculator-shared-resources/prod/us-east-2/edge/api-hostname/terraform.tfstate`.
+> The deployment is blocked until a read-only listing of the prod state bucket shows no object at the old key. If one
+> exists, move it to the new key with the owner's authorization before any `plan`. Basis (deviation STATE-KEY-004):
+> the new key was accepted from the 2026-10-07 read-only check (no API edge in prod, first deployment pending); the
+> listing itself has not been run yet. `dev` needs no check (owned by CloudFormation, no state bucket).
 
 ## Deployment
 

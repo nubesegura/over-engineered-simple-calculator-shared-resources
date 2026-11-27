@@ -61,7 +61,7 @@ jobs:
           esac
 
       - name: Validate environment configuration
-        working-directory: environments/dev
+        working-directory: aws/terraform/environments/dev
         env:
           AWS_REGION: ${{ vars.AWS_REGION }}
           ROLE_ARN_SET: ${{ secrets.ROLE_ARN != '' }}
@@ -88,7 +88,7 @@ jobs:
           fi
           [ "$missing" -eq 0 ] || exit 1
           if ! grep -qE "^\s*aws_region\s*=\s*\"$AWS_REGION\"" env.hcl; then
-            echo "::error file=environments/dev/env.hcl::AWS_REGION ($AWS_REGION) does not match aws_region in env.hcl"
+            echo "::error file=aws/terraform/environments/dev/env.hcl::AWS_REGION ($AWS_REGION) does not match aws_region in env.hcl"
             exit 1
           fi
 
@@ -119,7 +119,7 @@ jobs:
       # weights guard precondition, whose message stays in the log and in the summary).
       - name: Terragrunt Plan (detailed exit code)
         id: plan
-        working-directory: environments/dev/api-hostname
+        working-directory: aws/terraform/environments/dev/us-east-2/edge/api-hostname
         run: |
           set +e
           terragrunt plan -detailed-exitcode -lock=false -out=tfplan 2>&1 | tee "$RUNNER_TEMP/plan.txt"
@@ -128,7 +128,7 @@ jobs:
           exit 0
 
       - name: Summary of the drift
-        working-directory: environments/dev/api-hostname
+        working-directory: aws/terraform/environments/dev/us-east-2/edge/api-hostname
         env:
           PLAN_EXIT: ${{ steps.plan.outputs.exitcode }}
         run: |
@@ -139,7 +139,7 @@ jobs:
               2)
                 echo "The plan is not empty. Run **Deploy DEV** after reviewing it (a destroyed backend is retired by the deploy guard)."
                 echo ""
-                if terragrunt show -json tfplan > "$RUNNER_TEMP/plan.json" && python3 "$GITHUB_WORKSPACE/scripts/plan_guard.py" summary "$RUNNER_TEMP/plan.json"; then
+                if terragrunt show -json tfplan > "$RUNNER_TEMP/plan.json" && python3 "$GITHUB_WORKSPACE/aws/scripts/plan_guard.py" summary "$RUNNER_TEMP/plan.json"; then
                   :
                 else
                   echo "The plan could not be classified; read the job log."

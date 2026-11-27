@@ -37,14 +37,14 @@ Names are identical in `dev` and `prod` except for the last segment and the doma
 | `aws_sns_topic_subscription.alerts_email` | email endpoint from `SUPPORT_EMAIL` | the recipient must confirm it |
 | `aws_cloudwatch_metric_alarm.certificate_expiry["30"/"7"]` | `alrm-useast2-oecalc-api-cert-expiry-<days>d-<env>` | `AWS/CertificateManager` `DaysToExpiry`, minimum, period 1 day, missing data not breaching |
 
-Tags on every resource (provider default tags from `environments/root.hcl`): `team-owner = nube-segura`,
+Tags on every resource (provider default tags from `aws/terraform/environments/root.hcl`): `team-owner = nube-segura`,
 `project-name = over-engineered-calculator`, `app-name = calc-shared`,
 `repo-name = over-engineered-simple-calculator-shared-resources`, `env-type = <env>`.
 
 Differences between `dev` and `prod`: only `env.hcl` (environment name, web domain `...dev.nube-segura.com` versus
 `...nube-segura.com`, placeholder email default) and the GitHub environment values (role, account, hosted zone,
 weights, email). Both use region `us-east-2`. State bucket per environment: `bckt-useast2-tf-state-<env>-<account-id>`;
-state key `over-engineered-simple-calculator-shared-resources/<env>/api-hostname/terraform.tfstate`.
+state key `over-engineered-simple-calculator-shared-resources/<env>/us-east-2/edge/api-hostname/terraform.tfstate` (changed in spec 004; see the first-prod-deployment note in the README).
 
 Outputs: `certificate_arn`, `api_domain_name`, `active_backends` (name to weight).
 
@@ -98,6 +98,6 @@ an `ai` resource is refused. The `ai` host diagram entry is added when the diagr
   no shared state, no cross-account access.
 - The plan guard refuses deletes and replacements: the certificate, the validation records and the alarms cannot
   disappear by a routine deployment. The only delete it allows is a weighted record of a backend that is no longer
-  published (the backend was destroyed); see `scripts/plan_guard.py`. A daily drift check (dev) runs a plan without
+  published (the backend was destroyed); see `aws/scripts/plan_guard.py`. A daily drift check (dev) runs a plan without
   applying and alerts by a failed job.
 - The SNS topic accepts publishes only from CloudWatch of the same account and only over TLS.

@@ -1,4 +1,4 @@
-"""Run from the repository root: python -m unittest discover -s scripts/tests -v
+"""Run from the repository root: python -m unittest discover -s aws/scripts/tests -v
 
 Offline tests of .github/workflows-local/lib/cfn_local.py (registry normalisation of the ai host and
 the change set guard). The helper lives in a git-ignored folder: the module is skipped when it is absent.
@@ -11,7 +11,7 @@ import sys
 import tempfile
 import unittest
 
-LIB = os.path.join(os.path.dirname(__file__), "..", "..", ".github", "workflows-local", "lib")
+LIB = os.path.join(os.path.dirname(__file__), "..", "..", "..", ".github", "workflows-local", "lib")
 sys.path.insert(0, LIB)
 try:
     import cfn_local  # noqa: E402

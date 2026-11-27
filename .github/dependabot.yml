@@ -11,6 +11,6 @@ updates:
   # Provider constraints of the Terraform modules.
   - package-ecosystem: terraform
     directories:
-      - /modules/*
+      - /aws/terraform/modules/*
     schedule:
       interval: weekly

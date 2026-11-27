@@ -18,7 +18,7 @@ The `dev` environment is currently owned and managed exclusively by CloudFormati
 4. **Double `none` Sentinel Guard:** Protect Route 53 from invalid record creation while the AI backend custom domain is disabled:
    - **Template condition:** `IsAiRecordEnabled` requires `AiHostEnabled` to be true and both `AiDnsName` and `AiHostedZoneId` to be non-empty and not equal to `'none'`.
    - **Deploy helper (`cfn_local.py`):** Treats `none` (case-insensitive, trimmed) and empty values as unpublished, validates target syntax if populated, and permits safe retirement of `AiRecord` in the changeset guard.
-5. **CloudFormation-only Implementation (Deviation D1):** Implement the `ai` host exclusively in `aws/cloudformation/template.yaml` and parameter files (`dev`: `true`, `prod`: `false`). Leave the Terraform twin (`modules/api-hostname`) intentionally untouched (accepted deviation D1), as `dev` is managed solely by CloudFormation. A follow-up decision will determine whether to build the Terraform twin or deprecate the Terraform twin for this stack.
+5. **CloudFormation-only Implementation (Deviation D1):** Implement the `ai` host exclusively in `aws/cloudformation/template.yaml` and parameter files (`dev`: `true`, `prod`: `false`). Leave the Terraform twin (`aws/terraform/modules/api-hostname`; path updated by spec 004) intentionally untouched (accepted deviation D1), as `dev` is managed solely by CloudFormation. A follow-up decision will determine whether to build the Terraform twin or deprecate the Terraform twin for this stack.
 
 ## Consequences
 

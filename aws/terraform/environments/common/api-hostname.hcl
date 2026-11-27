@@ -7,7 +7,7 @@ locals {
 }
 
 terraform {
-  source = "${get_repo_root()}/modules/api-hostname"
+  source = "${get_repo_root()}/aws/terraform/modules/api-hostname"
 }
 
 inputs = {

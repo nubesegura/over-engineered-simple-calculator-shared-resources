@@ -3,7 +3,7 @@ description: Installs the pinned Terraform and Terragrunt versions (Terragrunt c
 
 inputs:
   terraform-version:
-    description: Terraform version (must satisfy required_version in modules/*/versions.tf)
+    description: Terraform version (must satisfy required_version in aws/terraform/modules/*/versions.tf)
     required: true
   terragrunt-version:
     description: Terragrunt version (without the leading "v")

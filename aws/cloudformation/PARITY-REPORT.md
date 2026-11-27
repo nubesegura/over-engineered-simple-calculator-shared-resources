@@ -2,14 +2,14 @@
 
 > **Target:** pure CloudFormation (no SAM: nothing to package), transform `AWS::LanguageExtensions` for `Fn::ForEach`
 > **Stack:** `oecalc-shared-api-hostname-<env>` from `aws/cloudformation/template.yaml`
-> **Terraform reference:** `modules/api-hostname` (main.tf, records.tf, monitoring.tf, ws.tf, variables.tf, outputs.tf)
-> and `environments/{common,dev,prod}` (working tree of 2026-10-26, including the uncommitted `ws.tf`)
+> **Terraform reference:** `aws/terraform/modules/api-hostname` (main.tf, records.tf, monitoring.tf, ws.tf, variables.tf, outputs.tf)
+> and `aws/terraform/environments/{common,dev,prod}` (working tree of 2026-10-26, including the uncommitted `ws.tf`)
 > **Date:** 2026-10-26
 
 ## 1. Summary
 
 The template creates the same resources, with the same names, SSM contracts and alarms, as the Terragrunt unit
-`environments/<env>/api-hostname`. Differences in mechanism (not in result) are listed in section 4.
+`aws/terraform/environments/<env>/us-east-2/edge/api-hostname`. Differences in mechanism (not in result) are listed in section 4.
 **Only one tool may own an environment at a time**: both create the same names (section 5).
 
 ## 2. Inputs
@@ -92,7 +92,7 @@ Prod (`WsHostEnabled=false`, `AiHostEnabled=false`): the ws and ai certificates,
    exactly like `try(tonumber(x), 0)` and refuses non-integers or values above 255.
 5. **create_before_destroy.** A certificate replacement in CloudFormation creates the new resource first and
    deletes the old one in the cleanup phase, which matches `create_before_destroy`. The deploy script refuses
-   any replacement anyway (owner rule of `scripts/plan_guard.py`).
+   any replacement anyway (owner rule of `aws/scripts/plan_guard.py`).
 6. **Update behavior.** `DomainName`, `DomainValidationOptions`, `KeyAlgorithm` of the certificate, `Name` of the
    SSM parameter, `TopicName`, `AlarmName`, `Endpoint` of the subscription and `Name`/`HostedZoneId` of the records
    force replacement. Changing `SUPPORT_EMAIL` therefore replaces the subscription, refused by the guard, exactly
@@ -104,14 +104,14 @@ Prod (`WsHostEnabled=false`, `AiHostEnabled=false`): the ws and ai certificates,
 8. **Alarm thresholds.** `Fn::ForEach` over `CertificateExpiryAlertDays` needs `CAPABILITY_AUTO_EXPAND`. Changing the
    list adds or removes alarms. Owner decision 2026-10-26: ACM-03 is exactly 30 and 7 days (was 90/60/30/15 with
    `LessThanThreshold`), so existing deployments retire the 90, 60 and 15 day alarms. Both guards allow only that
-   removal: `scripts/plan_guard.py` (pure delete of `certificate_expiry`/`ws_certificate_expiry` keys 90, 60, 15) and
+   removal: `aws/scripts/plan_guard.py` (pure delete of `certificate_expiry`/`ws_certificate_expiry` keys 90, 60, 15) and
    `lib/cfn_local.py changeset-guard` (`Api|WsCertExpiry{90,60,15}dAlarm`); the 30 and 7 day alarms and any other
    removal stay refused. The 30 day alarm changes operator in place (no replacement).
 9. **Tags.** The 5 mandatory tags are stack tags (propagated). `Name` tags on the certificates and SSM parameters are
    in the template, like Terraform. Route 53 records and the subscription have no tags in either tool.
 10. **`ai` host (CloudFormation-only gap, deviation D1).** Spec 003 added the `ai.<web domain>` host resources
     (`AiCertificate`, `AiCertificateArnParameter`, `AiCertExpiry30dAlarm`, `AiCertExpiry7dAlarm`, and `AiRecord`) only
-    to the CloudFormation template under `AiHostEnabled` (`dev` only). The Terraform twin (`modules/api-hostname`) was
+    to the CloudFormation template under `AiHostEnabled` (`dev` only). The Terraform twin (`aws/terraform/modules/api-hostname`) was
     intentionally left untouched (accepted deviation D1), because `dev` is owned exclusively by CloudFormation
     (`IAC_TOOL=cloudformation`). If dev is ever switched back to Terraform, the `ai` resources would be absent and would
     have to be ported or imported. The owner will record a follow-up decision on whether to build the Terraform twin or
@@ -143,4 +143,4 @@ permission is involved.
 
 Sources: cfn-lint 1.48.1 bundled resource schemas (property names, create-only properties); AWS CloudFormation
 Template Reference (`AWS::CertificateManager::Certificate`, `Fn::ForEach`) and User Guide (`Rules` section),
-consulted 2026-10-26; Terraform AWS provider constraint `~> 6.0` (modules/api-hostname/versions.tf).
+consulted 2026-10-26; Terraform AWS provider constraint `~> 6.0` (aws/terraform/modules/api-hostname/versions.tf).

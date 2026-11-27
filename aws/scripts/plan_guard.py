@@ -19,11 +19,11 @@ import sys
 
 RECORD_PREFIX = "aws_route53_record.api["
 WEIGHTS_GUARD = "terraform_data.weights_guard"
-# The one simple alias record of the WebSocket host. Keep in sync with modules/api-hostname/ws.tf.
+# The one simple alias record of the WebSocket host. Keep in sync with aws/terraform/modules/api-hostname/ws.tf.
 WS_RECORD_ADDRESS = "aws_route53_record.ws[0]"
 WS_LABEL = "ws"
 # Expiry alarms retired when ACM-03 went from 90/60/30/15 to 30/7 days. Keep in sync with
-# modules/api-hostname (monitoring.tf, ws.tf). Only these keys may be deleted.
+# aws/terraform/modules/api-hostname (monitoring.tf, ws.tf). Only these keys may be deleted.
 ALARM_TYPE = "aws_cloudwatch_metric_alarm"
 ALARM_PREFIXES = ("aws_cloudwatch_metric_alarm.certificate_expiry[", "aws_cloudwatch_metric_alarm.ws_certificate_expiry[")
 RETIRED_ALARM_KEYS = ("90", "60", "15")

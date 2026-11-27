@@ -1,4 +1,4 @@
-"""Run from the repository root: python -m unittest discover -s scripts/tests -v"""
+"""Run from the repository root: python -m unittest discover -s aws/scripts/tests -v"""
 import contextlib
 import io
 import json

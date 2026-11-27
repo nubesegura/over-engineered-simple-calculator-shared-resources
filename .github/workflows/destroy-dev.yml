@@ -43,7 +43,7 @@ jobs:
       cancel-in-progress: false
     defaults:
       run:
-        working-directory: environments/dev
+        working-directory: aws/terraform/environments/dev
     env:
       # Read by env.hcl.
       ROUTE53_ZONE_ID: ${{ vars.ROUTE53_ZONE_ID }}
@@ -103,7 +103,7 @@ jobs:
           done
           [ "$missing" -eq 0 ] || exit 1
           if ! grep -qE "^\s*aws_region\s*=\s*\"$AWS_REGION\"" env.hcl; then
-            echo "::error::AWS_REGION does not match aws_region in environments/dev/env.hcl"
+            echo "::error::AWS_REGION does not match aws_region in aws/terraform/environments/dev/env.hcl"
             exit 1
           fi
 
@@ -182,7 +182,7 @@ jobs:
           AWS_REGION: ${{ vars.AWS_REGION }}
         run: |
           set +e
-          python3 scripts/post_destroy_check.py --repo-name "${GITHUB_REPOSITORY#*/}" --env dev --region "$AWS_REGION" --retries 4 --wait 60 | tee "$RUNNER_TEMP/post-destroy.txt"
+          python3 aws/scripts/post_destroy_check.py --repo-name "${GITHUB_REPOSITORY#*/}" --env dev --region "$AWS_REGION" --retries 4 --wait 60 | tee "$RUNNER_TEMP/post-destroy.txt"
           rc=${PIPESTATUS[0]}
           {
             echo "### Post-destroy check"

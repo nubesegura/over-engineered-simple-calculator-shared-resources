@@ -31,33 +31,33 @@ jobs:
           terragrunt-version: ${{ env.TERRAGRUNT_VERSION }}
 
       - name: Terraform Format
-        run: terraform fmt -check -recursive modules
+        run: terraform fmt -check -recursive aws/terraform/modules
 
       - name: Terragrunt HCL Format
-        working-directory: environments
+        working-directory: aws/terraform/environments
         run: terragrunt hcl fmt --check
 
       - name: Validate mandatory tags in root.hcl
-        working-directory: environments
+        working-directory: aws/terraform/environments
         run: |
           REPO_NAME="${{ github.event.repository.name }}"
           for key in team-owner project-name app-name repo-name env-type; do
             if ! grep -qE "^\s*\"$key\"\s*=" root.hcl; then
-              echo "::error file=environments/root.hcl::Mandatory tag '$key' is missing from mandatory_tags"
+              echo "::error file=aws/terraform/environments/root.hcl::Mandatory tag '$key' is missing from mandatory_tags"
               exit 1
             fi
           done
           if ! grep -qE "\"repo-name\"\s*=\s*\"$REPO_NAME\"" root.hcl; then
-            echo "::error file=environments/root.hcl::Tag 'repo-name' does not match the repository name ($REPO_NAME)"
+            echo "::error file=aws/terraform/environments/root.hcl::Tag 'repo-name' does not match the repository name ($REPO_NAME)"
             exit 1
           fi
           echo "Mandatory tags present; repo-name = $REPO_NAME"
 
       - name: Validate S3 remote state
-        working-directory: environments
+        working-directory: aws/terraform/environments
         run: |
           if ! grep -qE '^\s*backend\s*=\s*"s3"' root.hcl; then
-            echo "::error file=environments/root.hcl::The S3 remote_state backend is missing or commented out"
+            echo "::error file=aws/terraform/environments/root.hcl::The S3 remote_state backend is missing or commented out"
             exit 1
           fi
           echo "S3 remote state configured"
@@ -79,9 +79,9 @@ jobs:
         run: |
           set -euo pipefail
           for module in api-hostname; do
-            echo "::group::terraform validate modules/$module"
-            terraform -chdir="modules/$module" init -backend=false -input=false
-            terraform -chdir="modules/$module" validate
+            echo "::group::terraform validate aws/terraform/modules/$module"
+            terraform -chdir="aws/terraform/modules/$module" init -backend=false -input=false
+            terraform -chdir="aws/terraform/modules/$module" validate
             echo "::endgroup::"
           done
 
@@ -92,5 +92,5 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Test scripts/plan_guard.py
-        run: python3 -m unittest discover -s scripts/tests -v
+      - name: Test aws/scripts/plan_guard.py
+        run: python3 -m unittest discover -s aws/scripts/tests -v

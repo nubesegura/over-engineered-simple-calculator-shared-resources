@@ -100,7 +100,7 @@ resource "aws_cloudwatch_metric_alarm" "ws_certificate_expiry" {
 # (local.published), which does not fail when a path is missing. The key `ws` is rejected in
 # var.backends, so this record never joins the weighted api set or its weights guard.
 # evaluate_target_health is false for the same reason as in records.tf.
-# Address kept in sync with WS_RECORD_ADDRESS in scripts/plan_guard.py.
+# Address kept in sync with WS_RECORD_ADDRESS in aws/scripts/plan_guard.py.
 # ---------------------------------------------------------
 locals {
   ws_backend_dns_name       = try(local.published["${local.registry_prefix}/ws/dns-name"], "")

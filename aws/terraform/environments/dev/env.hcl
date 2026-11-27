@@ -4,7 +4,7 @@
 # role (and therefore which account) the deployment assumes.
 locals {
   env        = "dev"
-  aws_region = "us-east-2"
+  aws_region = "us-east-2" # default; <env>/us-east-2/region.hcl takes precedence in root.hcl
 
   # Local (untracked) secrets.yml next to this file, used only when running Terragrunt
   # by hand; the deploy workflow passes the values as environment variables.

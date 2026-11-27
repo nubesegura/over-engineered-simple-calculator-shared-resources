@@ -5,7 +5,7 @@ have no owner and must never be destroyed or replaced on the way.
 
 ## Order
 
-1. **Import in the new owner.** Add `import` blocks (`modules/api-hostname/imports.tf`) with ids built from data sources
+1. **Import in the new owner.** Add `import` blocks (`aws/terraform/modules/api-hostname/imports.tf`; history written before spec 004: `modules/api-hostname/`) with ids built from data sources
    and locals, never literal account data. Imports are idempotent: once a resource is in the state they do nothing.
    Resources with no AWS object (certificate validation, weights guard) are recreated in state; resources whose
    creation is idempotent (validation CNAME with overwrite, email subscription) are created again.
@@ -26,7 +26,7 @@ flip back).
 
 ## Rollback
 
-- Before step 4: delete the new state (`<env>/api-hostname`); nothing else changed.
+- Before step 4: delete the new state (`<env>/api-hostname`, since spec 004 `<env>/us-east-2/edge/api-hostname`); nothing else changed.
 - After step 4: revert the commit that added the `removed` blocks, add the same `import` blocks in the old owner,
   deploy it, then forget the resources in the new owner with `removed` blocks and `destroy = false`.
 

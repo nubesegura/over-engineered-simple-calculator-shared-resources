@@ -2,8 +2,8 @@ AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::LanguageExtensions
 Description: >
   Shared API edge of Over-Engineered Simple Calculator (api.<web domain>, ws.<web domain> and ai.<web domain>).
-  Pure CloudFormation alternative to the Terraform / Terragrunt unit environments/<env>/api-hostname
-  (module modules/api-hostname): same resource names, same SSM contracts, same alarms.
+  Pure CloudFormation alternative to the Terraform / Terragrunt unit aws/terraform/environments/<env>/us-east-2/edge/api-hostname
+  (module aws/terraform/modules/api-hostname): same resource names, same SSM contracts, same alarms.
   Only ONE tool may own an environment at a time (see PARITY-REPORT.md).
 
 # ---------------------------------------------------------------------------------------------------

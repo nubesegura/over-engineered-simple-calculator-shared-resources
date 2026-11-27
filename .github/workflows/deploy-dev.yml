@@ -7,8 +7,8 @@ on:
     branches:
       - develop
     paths:
-      - environments/**
-      - modules/**
+      - aws/terraform/environments/**
+      - aws/terraform/modules/**
       - .github/workflows/**
       - .github/actions/**
   workflow_dispatch:

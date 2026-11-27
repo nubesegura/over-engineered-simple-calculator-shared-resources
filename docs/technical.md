@@ -4,11 +4,14 @@
 
 | Path | Content |
 |---|---|
-| `modules/api-hostname/` | `main.tf` (certificate, validation, SSM), `records.tf` (backend registry, weights guard, records), `monitoring.tf` (topic, policy, subscription, alarms), `variables.tf`, `outputs.tf`, `versions.tf` (the adoption file is kept only as a reference in `docs/migrations/001-move-api-edge/imports.tf.example`) |
-| `environments/root.hcl` | Provider with default tags, S3 remote state, `context = oecalc` |
-| `environments/common/api-hostname.hcl` | Unit shared by both environments |
-| `environments/{dev,prod}/env.hcl` | Region, web domain, hosted zone, alert email, weights |
-| `environments/{dev,prod}/api-hostname/terragrunt.hcl` | Includes `root.hcl` and the common unit |
+| `aws/terraform/modules/api-hostname/` | `main.tf` (certificate, validation, SSM), `records.tf` (backend registry, weights guard, records), `monitoring.tf` (topic, policy, subscription, alarms), `variables.tf`, `outputs.tf`, `versions.tf` (the adoption file is kept only as a reference in `docs/migrations/001-move-api-edge/imports.tf.example`) |
+| `aws/terraform/environments/root.hcl` | Provider with default tags, S3 remote state, `context = oecalc`; reads `region.hcl` and falls back to `env.hcl` |
+| `aws/terraform/environments/common/api-hostname.hcl` | Unit shared by both environments |
+| `aws/terraform/environments/{dev,prod}/env.hcl` | Region, web domain, hosted zone, alert email, weights |
+| `aws/terraform/environments/{dev,prod}/us-east-2/region.hcl` | Active region (`_global/` holds only a README) |
+| `aws/terraform/environments/{dev,prod}/us-east-2/edge/api-hostname/terragrunt.hcl` | Includes `root.hcl` and the common unit |
+| `aws/scripts/` | `plan_guard.py`, `post_destroy_check.py`, `tests/` |
+| `aws/cloudformation/` | CloudFormation twin (`template.yaml`, parameter files, `PARITY-REPORT.md`) |
 | `.github/` | `ci.yml`, `deploy.yml` (reusable), `deploy-dev.yml`, `deploy-prod.yml`, `actions/setup-iac`, `dependabot.yml` |
 
 Versions: Terraform `~> 1.9` (CI pins 1.16.2), AWS provider `~> 6.0`, Terragrunt 1.1.5 in CI.
@@ -16,8 +19,17 @@ Versions: Terraform `~> 1.9` (CI pins 1.16.2), AWS provider `~> 6.0`, Terragrunt
 ## State
 
 S3 bucket `bckt-useast2-tf-state-<env>-<account-id>`, key
-`over-engineered-simple-calculator-shared-resources/<env>/api-hostname/terraform.tfstate`, encrypted, native S3 locking.
+`over-engineered-simple-calculator-shared-resources/<env>/us-east-2/edge/api-hostname/terraform.tfstate`, encrypted, native S3 locking. Before spec 004 the key was `over-engineered-simple-calculator-shared-resources/<env>/api-hostname/terraform.tfstate`.
 `root.hcl` normalizes backslashes so a local run on Windows uses the same key as the CI.
+
+> **Before the first prod deployment (push to `main`, Terraform or CloudFormation):** the Terraform state key
+> changed when the unit moved under `aws/terraform/environments/<env>/us-east-2/edge/api-hostname/`.
+> Old key: `over-engineered-simple-calculator-shared-resources/prod/api-hostname/terraform.tfstate`.
+> New key: `over-engineered-simple-calculator-shared-resources/prod/us-east-2/edge/api-hostname/terraform.tfstate`.
+> The deployment is blocked until a read-only listing of the prod state bucket shows no object at the old key. If one
+> exists, move it to the new key with the owner's authorization before any `plan`. Basis (deviation STATE-KEY-004):
+> the new key was accepted from the 2026-10-07 read-only check (no API edge in prod, first deployment pending); the
+> listing itself has not been run yet. `dev` needs no check (owned by CloudFormation, no state bucket).
 
 ## Configuration
 
@@ -40,15 +52,15 @@ For local runs, an untracked `secrets.yml` next to `env.hcl` can provide the sam
   `terragrunt hcl fmt --check`, mandatory tags present and `repo-name` equal to the repository name, S3 backend
   present, `terraform validate` of the module.
 - **Deploy DEV / Deploy PROD:** run CI, then the reusable `deploy.yml`. Triggered by a push to `develop` / `main` that
-  changes `environments/**`, `modules/**` or the workflows, or by hand. `deploy.yml` validates the branch and the
+  changes `aws/**` or the workflows, or by hand. `deploy.yml` validates the branch and the
   configuration, assumes the role, checks the account, runs `terragrunt plan -out=tfplan`, **refuses any delete or
-  replacement** by reading the plan JSON with `scripts/plan_guard.py check` (one exception, below), applies the same
+  replacement** by reading the plan JSON with `aws/scripts/plan_guard.py check` (one exception, below), applies the same
   saved plan and writes the active weights in the job summary. One apply at a time per environment (concurrency group).
 - **Guard rule (changed 2026-10-13):** a plan is refused if it deletes or replaces anything, except a pure delete
   (actions exactly `["delete"]`) of an `aws_route53_record.api[...]` whose `set_identifier` is not kept by any other
   record of the plan: a backend that was destroyed and no longer publishes its SSM parameters. The certificate, the
   validation records, the alarms, the zone and any replacement stay protected. The retired backends are listed in the
-  job summary. The `weights_guard` precondition is unchanged. Tests: `python -m unittest discover -s scripts/tests`
+  job summary. The `weights_guard` precondition is unchanged. Tests: `python -m unittest discover -s aws/scripts/tests`
   (also a CI job).
 - A guard failure means the change needs a reviewed manual run outside the CI.
 - **Drift check DEV** (`drift-check.yml`; daily 06:17 UTC and by hand, dev only): same role, account check and
@@ -70,7 +82,7 @@ DNS caches converge within the target TTL. The module fails the plan if all publ
 
 1. The backend publishes `/oecalc/<env>/api-backends/<name>/dns-name` and `.../hosted-zone-id`, and reads
    `/oecalc/<env>/api-certificate-arn`.
-2. Add one entry to `api_backends` in `environments/dev/env.hcl` and `environments/prod/env.hcl`, copying the
+2. Add one entry to `api_backends` in `aws/terraform/environments/dev/env.hcl` and `aws/terraform/environments/prod/env.hcl`, copying the
    existing lines (`API_WEIGHT_<NAME>`).
 3. Add `API_WEIGHT_<NAME>: ${{ vars.API_WEIGHT_<NAME> }}` to the `env` block of `.github/workflows/deploy.yml` and to the
    "at least one weight" check.
@@ -128,6 +140,6 @@ old one, with a plan that has no delete and no replacement at every step.
 
 ## Local plan
 
-From `environments/<env>/api-hostname`, run `terragrunt plan` with the read-only profile of the environment
+From `aws/terraform/environments/<env>/us-east-2/edge/api-hostname`, run `terragrunt plan` with the read-only profile of the environment
 (`tf-local-admin-dev` or `tf-local-admin-prod`) and the variables above exported. Before pushing, search the output for
 `-/+`, `forces replacement` and `must be replaced`.
